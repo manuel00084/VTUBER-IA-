@@ -1,31 +1,35 @@
 # VTUBER-IA-
 Vtuber IA para Twitch 
-Hola a todos Bienvenido esta pequeña aplicacion podra ayudarte a tener una Vtuber con IA (Inteligencia atificial) con el que podras usar con cualquier programa de Vtuber de tu eleccion atraves del microfono virtual, esta aplicacion solo es el intermediario entre une ENTRE tu cuenta de TWICH, LA IA Y EL TTS DE TU PC, para que funcione tendras que leer las instruciones y poder configurarlo con tus datos abajo esta las instruciones, mil disculpa no soy un buen programador mi nivel de novato. todo fue hecho en PYTHON, asi cual quiera pueda revisarlo y tener la confianza de que no hay nada raro y nada oculto. Quien quiera modeficarlo y mejorarlo son libres de hacerlo.
+Hola a todos Bienvenido esta pequeña aplicacion podra ayudarte a tener una Vtuber con IA (Inteligencia atificial) con el que podras usar con cualquier programa de Vtuber de tu eleccion, esta aplicacion solo es el intermediario entre une ENTRE tu cuenta de TWICH, LA IA Y EL TTS DE TU PC, para que funcione tendras que leer las instruciones y poder configurarlo con tus datos abajo esta las instruciones, mil disculpa no soy un buen programador mi nivel de novato. todo fue hecho en PYTHON, asi cual quiera pueda revisarlo y tener la confianza de que no hay nada raro y nada oculto. Quien quiera modeficarlo y mejorarlo son libres de hacerlo.
 
 entre sus fuciones principales opciones son 
 Bot speaker; para poder escuchar lo que nos platica el chat
 !.- Voz neutral.
 2.- poder usar Voz de hombre.
 3.- poder usar voz de mujer.
+4.- opcion para selecionar la salida de audio
 
 Bot de IA; la principal funcion, siempre maneJara voz de Mujer. (se puede cambiar pero tendrias que mover el CODIGO)
 1.- Nuestro chat de Twich podra interactuar platicar. 
 2.- PROMPTS para darle personalidad a nuestra IA. 
 3.- Un boton para poder comunicarnos con Nuestra IA atraves de nuestro microfono, por ahora solo funciona con el boton de la ventana.
-4.- selecionar nuestra salida de Audio. 
+4.- Tiene 2 Salidas de audio 1 para micro vitual y la segunda para puedas escuchar en tus parlantes o bocinas. 
+
+
+==============INSTALCION DE PYTHON==================
+Primero Instalaremos python, como toda la aplicacion se basa en python iremos a esta paguina para no tener problemas de compatibilidad. bajaremos el archivo python-3.12.8-amd64.exe
+https://www.python.org/downloads/release/python-3128/
+https://www.python.org/ftp/python/3.12.8/python-3.12.8-arm64.exe
+
+Ejecutamos el programa de instalacion, marcaremos las 2 casillas o recuadros, use admin privilige  y ADD python.exe. PATCH
+alterminar es posble que no te funcione eso es debido a que te falte una dependencias para el python no te preocupes mas abajo estan las instrucciones.
+
 
 ===============================Instalaciones y configurar la aplicacion==================================================== 
 
-Primero nececitaremos Instalar unas cosas y poder conseguir unas llaves y tokenspara poder usar la aplicacion, 
+Aqui vamos a configurar nuetro ARCHIVO CONFIG.TXT con el tendremos accceso a twitch y a grog. TRANQUIL@ aqui te enseñare a donde conseguir estos datos que nececitas.
 
-
-ARCHIVO CONFIG.TXT
-Primero para que puedas Usar la aplicacion sin problemas Vas a tener que configurar la aplicacion esto lo aremos atraves del archivo config.txt dentro Basicamente bamos a poner llaves y token para poder conectar con twitch Y GROQ.
-TRANQUIL@ aqui te enseñare a donde conseguir estos datos que nececitas.
-
-Lo primero sera Bajar e instalar python nos vamos a esta pagina https://www.python.org/downloads/
-
-continuamos ingresaremos a este sitio web https://dev.twitch.tv a que nos vamos inscribir  para obtener nuestras primeras llaves.
+Empezaremos primero por Configurar nuesrtro acceso a twich vamos a requertir de 3 llaves a si que empesamos por ingresar a este sitio web https://dev.twitch.tv a que nos vamos inscribir para obtener nuestras 2 primeras llaves.
 ya inscrito y logeado ve al dashboard dentro del dashboard en la parte izquirda ve a donde dice aplicaciones a tu derecha se vera una lista vacia daremos click en registra tu aplicacion
 te saldra una paguina que te dira consola regrisra tu aplicacion.
 NOmbre El que Gustes (MiVTuber)
@@ -57,17 +61,26 @@ https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip
 
 Descargamos el archivo .zip aqui es importante que lo que descargemos quede en una carpeta con el nombre vosk-model-small-es-0.42 esta carpeta lo moveremos a donde esta nuesta aplicacion.
 
-En caso de que tengas problemas para ejecutar El archivo Main.py
-abre en windows el CMD o simbolo de sistemas y iremos instalando estos archivos uno por uno 
+==================INSTALAR DEPENDENCIAS PARA PYTHON=====================================
 
-pip install PyAudio
-pip install SpeechRecognition
-pip install edge-tts sounddevice soundfile
-pip install customtkinter edge-tts sounddevice soundfile requests
-pip install SpeechRecognition
-pip install keyboard
+PAra teminar es posible que el no se pueda ejecutar el programa asi que vamos abrir el programa CMD O SIMBOLO DEL SISTEMA
+se abrira una ventana es texto tipo MS DOS clasico. vamos a instalar unas depedencias para python, iremos a la carpeta donde 
+enermos nuestro programa, usando el explorador de windows copiamos la direccion donde se encuentra la aplicacion. 
+EJEMPLO:
 
-Con esto nuestra aplicacion debera funcionar sin problemas.
+Microsoft Windows [Versión 10.0.26100.8037]
+(c) Microsoft Corporation. Todos los derechos reservados.
+
+C:\Users\PCHP9843>cd C:\Users\PCHP9843\Desktop\VTUBER IA\VTUBER IA
+C:\Users\PCHP9843\Desktop\VTUBER IA\VTUBER IA
+
+Ya que se abrio la carpeta  como en el ejemplo vamos a ejecutar el comando, pip install -r requirements.txt
+EJEMPLO:
+
+C:\Users\PCHP9843\Desktop\VTUBER IA\VTUBER IA> pip install -r requirements.txt
+
+te instalara todas las dependencias que neceitas para poder ejecurtar la aplicacion.
+
 
 ===========================CONTENIDO DE LA APLICACION Y FUNCIONAMIENTO==========================================
 
@@ -87,3 +100,11 @@ POR DEFAULT LA VOZ POR EL TTS USARA VOZ DE MUJER.
 la aplicacion cuenta con una funcion de PROMPTS  que le dara mas personalidad a nuestra Vtuber ya trae por defecto unas 3 para seleccionar, pero puedes cear tus propias PROMPTS para que le des tu toque personal usando un bloc de notas de windows crear un archivo TXT con tus personalizacion Y lo pones en la carpeta de PROMT
 
 Otra funcion es poder comunicarnos con nuestra IA Atraves del microfono STT esto solo podremos hacerlo atraves de la ventana pulsado el boton
+
+ALpresionar el boton F9 podras hablarle a la IA
+
+
+
+=============VB CABLE VIRTUAL AUDIO==========================
+Recomendado para que tu vtuber pueda hablar o mover la boca 
+https://vb-audio.com/Cable/
