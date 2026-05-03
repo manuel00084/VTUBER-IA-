@@ -2,6 +2,7 @@ import customtkinter as ctk
 import threading
 import os
 import traceback
+import webbrowser  # <-- agregado
 
 # ===== IMPORTS SEGUROS =====
 try:
@@ -108,6 +109,19 @@ class App(ctk.CTk):
         self.mode_select.set(self.promt_files[0])
         self.change_mode(self.promt_files[0])
 
+        # ===== CRÉDITOS (AGREGADO) =====
+        def abrir_twitch():
+            webbrowser.open("https://www.twitch.tv/manuel0084")
+
+        creditos = ctk.CTkLabel(
+            self,
+            text="Créditos: Manuel0084 | twitch.tv/manuel0084",
+            font=("Arial", 12),
+            cursor="hand2"
+        )
+        creditos.pack(pady=10)
+        creditos.bind("<Button-1>", lambda e: abrir_twitch())
+
         # ===== PTT F9 =====
         self.ptt = None
         if PTTManager is not None:
@@ -168,7 +182,6 @@ class App(ctk.CTk):
         threading.Thread(target=run, daemon=True).start()
 
     def get_devices(self):
-        """Devuelve (speaker_id, ia_devices). ia_devices es int o lista [cable, monitor]."""
         speaker_name = self.speaker_select.get()
         ia_name = self.ia_select.get()
         monitor_name = self.monitor_select.get() if hasattr(self, "monitor_select") else "(Ninguno)"
