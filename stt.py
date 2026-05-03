@@ -1,86 +1,82 @@
 import sounddevice as sd
-import numpy as np
 import queue
 import sys
 import json
 import vosk
-
 import os
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "vosk-model-small-es-0.42")
-# ===== CONFIG =====
 
 q = queue.Queue()
+stream = None
+recognizer = None
+_model = None
 
-def callback(indata, frames, time, status):
+
+def _callback(indata, frames, time, status):
     if status:
         print(status, file=sys.stderr)
     q.put(bytes(indata))
 
+
+def _get_model():
+    global _model
+    if _model is None:
+        _model = vosk.Model(MODEL_PATH)
+    return _model
+
+
 def listen():
     try:
-        model = vosk.Model(MODEL_PATH)
-        recognizer = vosk.KaldiRecognizer(model, 16000)
-
+        rec = vosk.KaldiRecognizer(_get_model(), 16000)
         with sd.RawInputStream(samplerate=16000, blocksize=8000, dtype='int16',
-                               channels=1, callback=callback):
-
+                               channels=1, callback=_callback):
             print("🎤 Escuchando...")
             while True:
                 data = q.get()
-                if recognizer.AcceptWaveform(data):
-                    result = json.loads(recognizer.Result())
-                    text = result.get("text", "")
-                    return text
-
+                if rec.AcceptWaveform(data):
+                    result = json.loads(rec.Result())
+                    return result.get("text", "")
     except Exception as e:
         print("❌ STT error:", e)
         return None
-import queue
 
-stream = None
-recognizer = None
-q = queue.Queue()
 
-def listen_stream_start(app):
+def listen_stream_start():
     global stream, recognizer
-
-    model = vosk.Model(MODEL_PATH)
-    recognizer = vosk.KaldiRecognizer(model, 16000)
-
-    def callback(indata, frames, time, status):
-        if status:
-            print(status)
-        q.put(bytes(indata))
-
+    while not q.empty():
+        try:
+            q.get_nowait()
+        except queue.Empty:
+            break
+    recognizer = vosk.KaldiRecognizer(_get_model(), 16000)
     stream = sd.RawInputStream(
-        samplerate=16000,
-        blocksize=8000,
-        dtype='int16',
-        channels=1,
-        callback=callback
+        samplerate=16000, blocksize=8000, dtype='int16',
+        channels=1, callback=_callback
     )
     stream.start()
 
 
 def listen_stream_stop():
     global stream, recognizer
-
-    text = ""
-
+    text_parts = []
     try:
+        if stream is not None:
+            stream.stop()
+            stream.close()
         while not q.empty():
             data = q.get()
             if recognizer.AcceptWaveform(data):
-                result = json.loads(recognizer.Result())
-                text = result.get("text", "")
-
-        if stream:
-            stream.stop()
-            stream.close()
-
-        return text
-
+                res = json.loads(recognizer.Result())
+                if res.get("text"):
+                    text_parts.append(res["text"])
+        final = json.loads(recognizer.FinalResult())
+        if final.get("text"):
+            text_parts.append(final["text"])
+        return " ".join(text_parts).strip()
     except Exception as e:
         print("❌ STT stream error:", e)
         return None
+    finally:
+        stream = None
+        recognizer = None
