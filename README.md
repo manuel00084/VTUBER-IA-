@@ -1,174 +1,147 @@
 <p align="center">
-![Logo](https://i.postimg.cc/PxLbTvCX/9302f3e1-ad66-4197-87fa-f9372e76a239.png)
+  <img src="assets/logo.png" width="280">
 </p>
 
-<h1 align="center">VTUBER IA</h1>
+<h1 align="center">✨ VTUBER IA ✨</h1>
 
 <p align="center">
-Sistema VTuber con IA, voz y Twitch
+  🤖 AI VTuber Assistant • 🎤 Voice • 💬 Twitch • 🎭 Personality System
 </p>
-
 
 <p align="center">
-VTUBER IA busca crear una plataforma accesible y modular para VTubers con inteligencia artificial, permitiendo interacción en tiempo real con usuarios de Twitch mediante voz, chat e IA conversacional.
-siendo un sistema VTuber con integración de IA, voz TTS, interacción con Twitch y soporte para prompts personalizados.
-El objetivo principal es combinar:
+  Sistema VTuber experimental con integración de IA conversacional,
+  Text To Speech, Speech To Text e interacción en tiempo real con Twitch.
 </p>
 
-🤖 Inteligencia artificial
-🔊 Síntesis de voz
-🎤 Reconocimiento de voz
-💬 Integración con Twitch
-🎭 Personalidades dinámicas
+<p align="center">
+  <a href="https://github.com/manuel00084/VTUBER-IA-/stargazers">
+    <img src="https://img.shields.io/github/stars/manuel00084/VTUBER-IA-?style=for-the-badge">
+  </a>
 
-para crear una experiencia de VTuber más interactiva, autónoma y personalizable.
+  <img src="https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge">
+  <img src="https://img.shields.io/badge/Status-Experimental-purple?style=for-the-badge">
+  <img src="https://img.shields.io/badge/Platform-Windows-informational?style=for-the-badge">
+  <img src="https://img.shields.io/badge/AI-Groq-orange?style=for-the-badge">
+</p>
 
-Además, el proyecto busca servir como base para futuras funciones como:
+---
 
-Expresiones automáticas
-Integración con modelos VRM
-Memoria conversacional
-Reacciones emocionales
-Automatización de stream
-Sistemas de recompensas y eventos
+# 📸 Preview
 
-La meta es desarrollar una VTuber IA capaz de interactuar con la comunidad de forma natural y entretenida, manteniendo una arquitectura abierta y fácil de expandir.
+<p align="center">
+  <img src="assets/logo.png" width="550">
+</p>
 
-Proyecto creado por Manuel0084
+---
 
+# ✨ Features
 
--------------------------------------------------------------------------------------------------
-✨ Características
-🤖 Integración con IA usando Groq
-🔊 Text To Speech (TTS)
-🎤 Speech To Text (STT)
-💬 Integración con chat de Twitch
-🎭 Sistema de prompts personalizables
-🎧 Selección de dispositivos de audio
-⌨️ Push To Talk (F9)
-🖥️ Interfaz gráfica con CustomTkinter
-🔥 Arquitectura modular
+- 🤖 AI conversation system
+- 🔊 Text To Speech (TTS)
+- 🎤 Speech To Text (STT)
+- 💬 Twitch chat integration
+- 🎭 Dynamic personality prompts
+- 🎧 Advanced audio routing
+- ⌨️ Push To Talk (F9)
+- 🖥️ Modern CustomTkinter interface
+- 🔥 Modular architecture
 
--------------------------------------------------------------------------------------------------
-📦 Tecnologías utilizadas
-Python
-CustomTkinter
-Edge-TTS
-Groq API
-Twitch IRC
-Speech Recognition
-PyAudio
+---
 
--------------------------------------------------------------------------------------------------
-📁 Estructura del proyecto
-VTUBER-IA/
-│
-├── PROMT/
-├── audio.py
-├── config.py
-├── devices.py
-├── ia.py
-├── main.py
-├── ptt.py
-├── stt.py
-├── twitch_bot.py
-└── requirements.txt
+# 🎯 Project Goal
 
--------------------------------------------------------------------------------------------------
-⚙️ Requisitos
-🐍 Python
-Se recomienda:
+VTUBER IA busca crear una plataforma modular para VTubers con inteligencia artificial,
+permitiendo interacción natural mediante voz, chat y personalidad dinámica.
 
-Python 3.11
+Inspirado en proyectos como Neuro-sama y sistemas AI VTuber modernos. :contentReference[oaicite:4]{index=4}
 
--------------------------------------------------------------------------------------------------
-🔧 Instalación
-1️⃣ Clonar repositorio
+---
 
+# 🚀 Installation
+
+## Clone repository
+
+```bash
 git clone https://github.com/manuel00084/VTUBER-IA-.git
-
 cd VTUBER-IA-
+```
 
--------------------------------------------------------------------------------------------------
-3️⃣ Instalar dependencias
+## Install dependencies
+
+```bash
 pip install -r requirements.txt
+```
 
-📦 Dependencias importantes
+## Run
 
-Si alguna falla manualmente:
-
-pip install customtkinter
-pip install edge-tts
-pip install requests
-pip install keyboard
-pip install pyaudio
-pip install SpeechRecognition
-
--------------------------------------------------------------------------------------------------
-🎤 Configuración de audio
-La aplicación permite seleccionar:
-
-🔊 Bot Speaker
-🤖 Voz IA
-🎧 Monitor/Auriculares
-
-Para mejores resultados se recomienda:
-
-VB-CABLE
-VoiceMeeter Banana
-
--------------------------------------------------------------------------------------------------
-🤖 API Groq
-
-Necesitas una API Key de Groq
-
-Sitio oficial:
-👉 https://console.groq.com/
-
--------------------------------------------------------------------------------------------------
-▶️ Ejecutar aplicación
+```bash
 python main.py
+```
 
-🎭 Prompts personalizados
+---
 
-Los prompts se almacenan en:
+# ⚙️ Requirements
 
-PROMT/
+| Requirement | Version |
+|---|---|
+| Python | 3.11 |
+| OS | Windows |
+| Twitch Account | Required |
+| Groq API Key | Required |
 
-Puedes crear archivos .txt para cambiar la personalidad de la IA.
+---
 
-Ejemplo:
+# 🔑 Configuration
 
-Eres una VTuber divertida y energética.
+Example configuration:
 
--------------------------------------------------------------------------------------------------
-🧠 Funciones IA
+```json
+{
+  "GROQ_API_KEY": "YOUR_API_KEY",
+  "TWITCH_TOKEN": "oauth:YOUR_TOKEN",
+  "NICK": "your_user",
+  "CHANNEL": "your_channel"
+}
+```
 
-Conversación en tiempo real
-Respuestas por voz
-Personalidad configurable
-Integración con chat
--------------------------------------------------------------------------------------------------
+---
 
-⚠️ Problemas comunes
-❌ PyAudio no instala
+# 🧠 Technologies
 
-Windows suele necesitar wheel manual.
+- Python
+- CustomTkinter
+- Edge-TTS
+- Twitch IRC
+- Groq API
+- SpeechRecognition
+- PyAudio
 
-Puedes descargarlo aquí:
-👉 https://www.lfd.uci.edu/~gohlke/pythonlibs/
+---
 
-❌ Twitch no conecta
+# ⚠️ Project Status
 
-Verificar:
+This project is currently in active experimental development.
 
-OAuth válido
-Canal correcto
-Internet activo
-❌ No se escucha audio
+Features may change frequently.
 
-Revisar:
+---
 
-Dispositivo seleccionado
-VB-CABLE
-VoiceMeeter
+# 👤 Credits
+
+<p align="center">
+  Developed by <b>Manuel Montes de Oca</b>
+</p>
+
+<p align="center">
+  🎮 Twitch:
+  <a href="https://www.twitch.tv/manuel0084">
+    twitch.tv/manuel0084
+  </a>
+</p>
+
+<p align="center">
+  💻 GitHub:
+  <a href="https://github.com/manuel00084/VTUBER-IA-">
+    VTUBER-IA
+  </a>
+</p>
