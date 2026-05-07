@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" width="280">
+  <img src="https://i.postimg.cc/PxLbTvCX/9302f3e1-ad66-4197-87fa-f9372e76a239.png" width="280">
 </p>
 
 <h1 align="center">✨ VTUBER IA ✨</h1>
