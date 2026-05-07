@@ -1,12 +1,10 @@
-"""
-main.py  —  VTuber IA (con OAuth Twitch de 1 clic)
-"""
 import customtkinter as ctk
 import threading
 import os
 import traceback
 import webbrowser
 
+# ===== IMPORTS SEGUROS =====
 try:
     from config import load_config, save_config
 except Exception as e:
@@ -19,14 +17,14 @@ try:
 except Exception as e:
     print("Error audio:", e)
     def audio_worker(): pass
-    def speak(*a, **k): print("speak fallback:", a)
+    def speak(*args, **kwargs): print("speak fallback:", args)
     def stop_audio(): pass
 
 try:
     from ia import ask_groq
 except Exception as e:
     print("Error ia:", e)
-    def ask_groq(*a, **k): return "IA no disponible"
+    def ask_groq(*args, **kwargs): return "IA no disponible"
 
 try:
     from devices import get_output_devices
@@ -38,7 +36,7 @@ try:
     from twitch_bot import start_chat
 except Exception as e:
     print("Error twitch_bot:", e)
-    def start_chat(*a, **k): print("Twitch deshabilitado")
+    def start_chat(*args, **kwargs): print("Twitch deshabilitado")
 
 try:
     from ptt import PTTManager
@@ -47,273 +45,398 @@ except Exception as e:
     PTTManager = None
 
 try:
-    from oauth_server import TwitchOAuth
-    OAUTH_AVAILABLE = True
+    from game_watcher import GameWatcher
 except Exception as e:
-    print("OAuth no disponible:", e)
-    OAUTH_AVAILABLE = False
+    print("Error game_watcher:", e)
+    GameWatcher = None
 
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("dark-blue")
+try:
+    from translator import TranslatorManager
+except Exception as e:
+    print("Error translator:", e)
+    TranslatorManager = None
 
-PURPLE = "#9B59B6"; PURPLE_DRK = "#7D3C98"; PINK = "#E91E8C"
-DARK_BG = "#1A1A2E"; CARD_BG = "#16213E"; ENTRY_BG = "#0F3460"
-GREEN_OK = "#2ECC71"; RED_ERR = "#E74C3C"
-TEXT_WHITE = "#EAEAEA"; TEXT_GRAY = "#A0A0C0"
+config = load_config()
 
 
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("VTuber IA")
-        self.geometry("540x820")
-        self.configure(fg_color=DARK_BG)
-        self._config = load_config()
+        self.title("VTuber AI - ESTABLE")
+        self.geometry("540x980")
+
         threading.Thread(target=audio_worker, daemon=True).start()
 
+        # ===== PROMPTS =====
         self.promt_folder = os.path.join(os.path.dirname(__file__), "PROMT")
         os.makedirs(self.promt_folder, exist_ok=True)
         self.promt_files = [f for f in os.listdir(self.promt_folder) if f.endswith(".txt")]
+
         if not self.promt_files:
-            with open(os.path.join(self.promt_folder, "default.txt"), "w", encoding="utf-8") as f:
+            default_path = os.path.join(self.promt_folder, "default.txt")
+            with open(default_path, "w", encoding="utf-8") as f:
                 f.write("Eres una VTuber divertida.")
             self.promt_files = ["default.txt"]
+
         self.current_prompt = "Eres una VTuber divertida."
 
-        self._build_ui()
-        self._init_ptt()
-        self.after(300, self._check_groq_key)
+        # ===== UI =====
+        ctk.CTkLabel(self, text="Sistema iniciado (modo estable)").pack(pady=8)
 
-    def _build_ui(self):
-        ctk.CTkLabel(self, text="🎀  VTuber IA",
-                     font=("Georgia", 22, "bold"), text_color=PINK).pack(pady=(20, 4))
+        self.logs = ctk.CTkTextbox(self, height=160)
+        self.logs.pack(pady=8, padx=10, fill="x")
 
-        # ── Groq API Key ──────────────────────────────────────────────────
-        groq_frame = ctk.CTkFrame(self, fg_color=CARD_BG, corner_radius=14)
-        groq_frame.pack(padx=20, pady=(8, 4), fill="x")
-        ctk.CTkLabel(groq_frame, text="🤖  Groq API Key  (IA gratuita)",
-                     font=("Helvetica", 13, "bold"), text_color=PURPLE).pack(anchor="w", padx=16, pady=(12, 4))
-        self._groq_var = ctk.StringVar(value=self._config.get("GROQ_API_KEY", ""))
-        self._groq_entry = ctk.CTkEntry(groq_frame, textvariable=self._groq_var,
-            placeholder_text="gsk_...", show="•",
-            fg_color=ENTRY_BG, border_color=PURPLE, text_color=TEXT_WHITE,
-            corner_radius=8, height=36)
-        self._groq_entry.pack(padx=16, fill="x")
-        row = ctk.CTkFrame(groq_frame, fg_color="transparent")
-        row.pack(fill="x", padx=16, pady=(4, 10))
-        ctk.CTkButton(row, text="💾 Guardar key", fg_color=PURPLE, hover_color=PURPLE_DRK,
-            corner_radius=8, height=30, width=130, font=("Helvetica", 11),
-            command=self._save_groq_key).pack(side="left")
-        ctk.CTkButton(row, text="🔗 Conseguir Groq key gratis",
-            fg_color="transparent", hover_color=ENTRY_BG, text_color=PINK,
-            corner_radius=8, height=30, font=("Helvetica", 11),
-            command=lambda: webbrowser.open("https://console.groq.com/keys")).pack(side="left", padx=8)
+        ctk.CTkButton(self, text="Test GUI",        command=self.test_log).pack(pady=2)
+        ctk.CTkButton(self, text="Test Voz",        command=self.test_voice).pack(pady=2)
+        ctk.CTkButton(self, text="Test IA",         command=self.test_ia).pack(pady=2)
+        ctk.CTkButton(self, text="Conectar Twitch", command=self.connect_twitch).pack(pady=6)
+        ctk.CTkButton(self, text="🎤 Hablar con IA", command=self.ptt_click).pack(pady=2)
 
-        # ── Twitch OAuth ──────────────────────────────────────────────────
-        twitch_frame = ctk.CTkFrame(self, fg_color=CARD_BG, corner_radius=14)
-        twitch_frame.pack(padx=20, pady=4, fill="x")
-        ctk.CTkLabel(twitch_frame, text="🎮  Cuenta de Twitch",
-                     font=("Helvetica", 13, "bold"), text_color=PURPLE).pack(anchor="w", padx=16, pady=(12, 6))
-        self._twitch_lbl = ctk.CTkLabel(twitch_frame, text="● No conectado",
-            font=("Helvetica", 12), text_color=RED_ERR)
-        self._twitch_lbl.pack(padx=16, anchor="w")
-        self._oauth_btn = ctk.CTkButton(twitch_frame,
-            text="🔑  Conectar con Twitch  (1 clic)",
-            font=("Helvetica", 14, "bold"),
-            fg_color="#6441A5", hover_color="#4B317E",
-            corner_radius=10, height=46, command=self._start_oauth)
-        self._oauth_btn.pack(padx=16, pady=(8, 4), fill="x")
-        ctk.CTkLabel(twitch_frame,
-            text="Se abre tu navegador → inicias sesión → ¡listo! Sin copiar tokens.",
-            font=("Helvetica", 10), text_color=TEXT_GRAY).pack(padx=16, pady=(0, 12))
-
-        # ── Iniciar bot ───────────────────────────────────────────────────
-        self._connect_btn = ctk.CTkButton(self,
-            text="🔌  Iniciar bot de chat",
-            font=("Helvetica", 13, "bold"),
-            fg_color=PURPLE, hover_color=PURPLE_DRK,
-            corner_radius=10, height=40, command=self.connect_twitch, state="disabled")
-        self._connect_btn.pack(padx=20, pady=(8, 3), fill="x")
-
-        ctk.CTkButton(self, text="🎤  Hablar con IA  (F9)",
-            font=("Helvetica", 12), fg_color=CARD_BG, hover_color="#1E3A5F",
-            corner_radius=10, height=36, command=self.ptt_click).pack(padx=20, pady=3, fill="x")
-
-        # ── Logs ─────────────────────────────────────────────────────────
-        self.logs = ctk.CTkTextbox(self, height=150,
-            fg_color="#0D0D1A", text_color="#C8F7C5",
-            font=("Courier", 11), corner_radius=10)
-        self.logs.pack(padx=20, pady=8, fill="x")
-
-        # ── Dispositivos ──────────────────────────────────────────────────
-        dev_frame = ctk.CTkFrame(self, fg_color=CARD_BG, corner_radius=12)
-        dev_frame.pack(padx=20, pady=4, fill="x")
-        ctk.CTkLabel(dev_frame, text="🔊  Audio",
-                     font=("Helvetica", 12, "bold"), text_color=PURPLE).pack(anchor="w", padx=14, pady=(10, 4))
+        # ===== DISPOSITIVOS =====
         self.devices = get_output_devices()
-        device_names = [name for name, _ in self.devices]
-        for label_text, attr in [("Bot Speaker:", "speaker_select"), ("IA / VTuber:", "ia_select")]:
-            r = ctk.CTkFrame(dev_frame, fg_color="transparent")
-            r.pack(fill="x", padx=14, pady=2)
-            ctk.CTkLabel(r, text=label_text, width=100,
-                         font=("Helvetica", 11), text_color=TEXT_GRAY).pack(side="left")
-            combo = ctk.CTkComboBox(r, values=device_names, width=300)
-            combo.pack(side="left")
-            setattr(self, attr, combo)
-        r = ctk.CTkFrame(dev_frame, fg_color="transparent")
-        r.pack(fill="x", padx=14, pady=(2, 10))
-        ctk.CTkLabel(r, text="Monitor:", width=100,
-                     font=("Helvetica", 11), text_color=TEXT_GRAY).pack(side="left")
-        self.monitor_select = ctk.CTkComboBox(r, values=["(Ninguno)"] + device_names, width=300)
-        self.monitor_select.pack(side="left")
+        device_names = [name for name, i in self.devices]
+
+        ctk.CTkLabel(self, text="🔊 Bot Speaker").pack(pady=2)
+        self.speaker_select = ctk.CTkComboBox(self, values=device_names)
+        self.speaker_select.pack(pady=2)
+
+        ctk.CTkLabel(self, text="🤖 IA Voz (cable virtual / VMagic)").pack(pady=2)
+        self.ia_select = ctk.CTkComboBox(self, values=device_names)
+        self.ia_select.pack(pady=2)
+
+        ctk.CTkLabel(self, text="🎧 Monitor (tus auriculares)").pack(pady=2)
+        self.monitor_select = ctk.CTkComboBox(self, values=["(Ninguno)"] + device_names)
+        self.monitor_select.pack(pady=2)
         self.monitor_select.set("(Ninguno)")
+
         if device_names:
             self.speaker_select.set(device_names[0])
             self.ia_select.set(device_names[0])
 
-        # ── Prompt ───────────────────────────────────────────────────────
-        pf = ctk.CTkFrame(self, fg_color=CARD_BG, corner_radius=12)
-        pf.pack(padx=20, pady=4, fill="x")
-        ctk.CTkLabel(pf, text="🎭  Personalidad",
-                     font=("Helvetica", 12, "bold"), text_color=PURPLE).pack(anchor="w", padx=14, pady=(10, 4))
-        self.mode_select = ctk.CTkComboBox(pf, values=self.promt_files,
-                                           command=self.change_mode, width=360)
-        self.mode_select.pack(padx=14, pady=(0, 10))
+        # ===== PROMPT =====
+        ctk.CTkLabel(self, text="🎭 Prompt IA").pack(pady=2)
+        self.mode_select = ctk.CTkComboBox(self, values=self.promt_files, command=self.change_mode)
+        self.mode_select.pack(pady=2)
         self.mode_select.set(self.promt_files[0])
         self.change_mode(self.promt_files[0])
 
-        # ── Créditos ─────────────────────────────────────────────────────
-        lbl = ctk.CTkLabel(self, text="💜  Créditos: Manuel0084  |  twitch.tv/manuel0084",
-                           font=("Helvetica", 11), text_color=TEXT_GRAY, cursor="hand2")
-        lbl.pack(pady=10)
-        lbl.bind("<Button-1>", lambda e: webbrowser.open("https://www.twitch.tv/manuel0084"))
+        # ===== GAME WATCHER =====
+        self.game_watcher = None
+        ctk.CTkLabel(self, text="🎮 Comentarista de Juego").pack(pady=(10, 2))
 
-    def _init_ptt(self):
+        frame_watcher = ctk.CTkFrame(self)
+        frame_watcher.pack(pady=2)
+        ctk.CTkLabel(frame_watcher, text="Cada cuántos segundos:").pack(side="left", padx=5)
+        self.intervalo_var = ctk.StringVar(value="30")
+        ctk.CTkEntry(frame_watcher, textvariable=self.intervalo_var, width=60).pack(side="left", padx=5)
+
+        self.btn_watcher = ctk.CTkButton(
+            self, text="▶ Iniciar Comentarista",
+            command=self.toggle_watcher, fg_color="green")
+        self.btn_watcher.pack(pady=4)
+
+        # ===== TRADUCTOR =====
+        self.translator = None
+        ctk.CTkLabel(self, text="🈳 Traductor en Tiempo Real",
+                     font=("Arial", 13, "bold")).pack(pady=(14, 2))
+
+        # Idioma destino
+        frame_idioma = ctk.CTkFrame(self)
+        frame_idioma.pack(pady=2)
+        ctk.CTkLabel(frame_idioma, text="Traducir a:").pack(side="left", padx=6)
+        self.idioma_var = ctk.StringVar(value="español")
+        idioma_menu = ctk.CTkComboBox(
+            frame_idioma,
+            values=["español", "inglés", "portugués", "francés", "alemán"],
+            variable=self.idioma_var,
+            width=130
+        )
+        idioma_menu.pack(side="left", padx=4)
+
+        # Intervalo continuo
+        frame_trad_int = ctk.CTkFrame(self)
+        frame_trad_int.pack(pady=2)
+        ctk.CTkLabel(frame_trad_int, text="Intervalo continuo (seg):").pack(side="left", padx=6)
+        self.trad_intervalo_var = ctk.StringVar(value="4")
+        ctk.CTkEntry(frame_trad_int, textvariable=self.trad_intervalo_var, width=55).pack(side="left", padx=4)
+
+        # Leer en voz
+        self.leer_voz_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(self, text="🔊 Leer traducción en voz",
+                        variable=self.leer_voz_var).pack(pady=2)
+
+        # Botones del traductor
+        frame_btns = ctk.CTkFrame(self)
+        frame_btns.pack(pady=4, padx=10, fill="x")
+
+        ctk.CTkButton(
+            frame_btns, text="📷 Capturar área\n(traducir una vez)",
+            command=self.trad_area_unica, width=120, height=48
+        ).pack(side="left", padx=4, pady=4)
+
+        ctk.CTkButton(
+            frame_btns, text="🖥️ Pantalla completa\n(traducir una vez)",
+            command=self.trad_pantalla_unica, width=120, height=48
+        ).pack(side="left", padx=4, pady=4)
+
+        self.btn_continuo_area = ctk.CTkButton(
+            frame_btns, text="🔄 Área continua\n(seleccionar)",
+            command=self.trad_continuo_area, width=120, height=48,
+            fg_color="#1f6aa5"
+        )
+        self.btn_continuo_area.pack(side="left", padx=4, pady=4)
+
+        self.btn_continuo_full = ctk.CTkButton(
+            frame_btns, text="🔄 Pantalla\ncontinua",
+            command=self.trad_continuo_full, width=100, height=48,
+            fg_color="#1f6aa5"
+        )
+        self.btn_continuo_full.pack(side="left", padx=4, pady=4)
+
+        self.btn_detener_trad = ctk.CTkButton(
+            self, text="⏹ Detener Traducción",
+            command=self.detener_traduccion,
+            fg_color="gray40", state="disabled"
+        )
+        self.btn_detener_trad.pack(pady=3)
+
+        # ===== CRÉDITOS =====
+        def abrir_twitch():
+            webbrowser.open("https://www.twitch.tv/manuel0084")
+
+        creditos = ctk.CTkLabel(
+            self,
+            text="Créditos: Manuel0084 | twitch.tv/manuel0084",
+            font=("Arial", 12), cursor="hand2"
+        )
+        creditos.pack(pady=10)
+        creditos.bind("<Button-1>", lambda e: abrir_twitch())
+
+        # ===== PTT F9 =====
         self.ptt = None
         if PTTManager is not None:
             try:
-                self.ptt = PTTManager(app=self, ask_groq=ask_groq, speak=speak,
-                    stop_audio=stop_audio, config=self._config, get_devices=self.get_devices,
-                    current_prompt=lambda: self.current_prompt, key="f9", voice="es-MX-DaliaNeural")
-                self.log("⌨️  PTT listo — mantén F9 para hablar")
+                self.ptt = PTTManager(
+                    app=self,
+                    ask_groq=ask_groq,
+                    speak=speak,
+                    stop_audio=stop_audio,
+                    config=config,
+                    get_devices=self.get_devices,
+                    current_prompt=lambda: self.current_prompt,
+                    key="f9",
+                    voice="es-MX-DaliaNeural",
+                )
+                self.log("⌨️ PTT listo - manten F9 para hablar")
             except Exception as e:
-                self.log(f"⚠️  PTT: {e}")
+                self.log(f"⚠️ PTT no se pudo iniciar: {e}")
+                traceback.print_exc()
         else:
-            self.log("⚠️  PTT no disponible — instala: pip install keyboard")
+            self.log("⚠️ PTT no disponible. Instala: pip install keyboard")
 
-    def _check_groq_key(self):
-        key = self._config.get("GROQ_API_KEY", "").strip()
-        if key:
-            self.log("✅  Groq API Key encontrada.")
-            self._update_connect_btn()
-        else:
-            self.log("💡  Ingresa tu Groq API Key arriba (es gratis).")
-        token = self._config.get("TWITCH_TOKEN", "").strip()
-        nick  = self._config.get("NICK", "").strip()
-        if token and nick:
-            self._on_twitch_connected(nick)
+        if GameWatcher is None:
+            self.log("⚠️ GameWatcher no disponible. Instala: pip install pillow")
+        if TranslatorManager is None:
+            self.log("⚠️ Traductor no disponible. Instala: pip install pillow")
 
-    def _save_groq_key(self):
-        key = self._groq_var.get().strip()
-        if not key:
-            self.log("❌  La key no puede estar vacía.")
-            return
-        self._config["GROQ_API_KEY"] = key
-        save_config(self._config)
-        self.log("✅  Groq API Key guardada.")
-        self._update_connect_btn()
-
-    def _start_oauth(self):
-        if not OAUTH_AVAILABLE:
-            self.log("❌  oauth_server.py no encontrado.")
-            return
-        from oauth_server import CLIENT_ID
-        if CLIENT_ID == "TU_CLIENT_ID_AQUI":
-            self.log("❌  Configura CLIENT_ID y CLIENT_SECRET en oauth_server.py")
-            return
-        self.log("🌐  Abriendo Twitch en el navegador...")
-        self._oauth_btn.configure(text="⏳  Esperando autorización...", state="disabled")
-        oauth = TwitchOAuth(
-            on_success=self._on_twitch_auth_success,
-            on_error=lambda msg: self.after(0, self.log, f"❌  {msg}"),
-        )
-        oauth.start()
-
-    def _on_twitch_auth_success(self, token, nick, channel):
-        self._config["TWITCH_TOKEN"] = token
-        self._config["NICK"]         = nick
-        self._config["CHANNEL"]      = channel
-        save_config(self._config)
-        self.after(0, self._on_twitch_connected, nick)
-
-    def _on_twitch_connected(self, nick):
-        self._twitch_lbl.configure(text=f"● Conectado como {nick}", text_color=GREEN_OK)
-        self._oauth_btn.configure(text=f"✅  {nick} — volver a conectar", state="normal")
-        self._update_connect_btn()
-        self.log(f"🎉  Twitch autenticado como {nick}")
-
-    def _update_connect_btn(self):
-        token = self._config.get("TWITCH_TOKEN", "").strip()
-        key   = self._config.get("GROQ_API_KEY", "").strip()
-        self._connect_btn.configure(state="normal" if token and key else "disabled")
-
+    # ==================================================================
+    #  MÉTODOS GENERALES
+    # ==================================================================
     def log(self, text):
         self.logs.insert("end", text + "\n")
         self.logs.see("end")
+
+    def test_log(self):
+        self.log("✅ GUI funcionando")
+
+    def test_voice(self):
+        stop_audio()
+        _, ia_dev = self.get_devices()
+        speak("Hola, prueba de voz", "es-ES-AlvaroNeural", ia_dev)
+
+    def test_ia(self):
+        def run():
+            stop_audio()
+            respuesta = ask_groq("Di algo como VTuber", config.get("GROQ_API_KEY", ""), self.current_prompt)
+            self.log(f"IA: {respuesta}")
+            _, ia_dev = self.get_devices()
+            speak(respuesta, "es-MX-DaliaNeural", ia_dev)
+        threading.Thread(target=run, daemon=True).start()
 
     def ptt_click(self):
         def run():
             from stt import listen
             stop_audio()
-            self.log("🎤  Escuchando...")
+            self.log("🎤 Escuchando...")
             text = listen()
             if not text:
-                self.log("❌  No se entendió")
+                self.log("❌ No se entendio")
                 return
-            self.log(f"🗣️  Tú: {text}")
-            respuesta = ask_groq(text, self._config.get("GROQ_API_KEY", ""), self.current_prompt)
-            self.log(f"🤖  IA: {respuesta}")
+            self.log(f"🗣️ Tu: {text}")
+            respuesta = ask_groq(text, config.get("GROQ_API_KEY", ""), self.current_prompt)
+            self.log(f"🤖 IA: {respuesta}")
             _, ia_dev = self.get_devices()
             speak(respuesta, "es-MX-DaliaNeural", ia_dev)
         threading.Thread(target=run, daemon=True).start()
 
     def get_devices(self):
-        sn = self.speaker_select.get(); ia = self.ia_select.get(); mo = self.monitor_select.get()
-        sid  = next((i for n, i in self.devices if n == sn), 0)
-        iaid = next((i for n, i in self.devices if n == ia), 0)
-        if mo == "(Ninguno)": return sid, iaid
-        mid = next((i for n, i in self.devices if n == mo), None)
-        return sid, ([iaid, mid] if mid and mid != iaid else iaid)
+        speaker_name = self.speaker_select.get()
+        ia_name      = self.ia_select.get()
+        monitor_name = self.monitor_select.get() if hasattr(self, "monitor_select") else "(Ninguno)"
+
+        speaker_id = next((i for name, i in self.devices if name == speaker_name), 0)
+        ia_id      = next((i for name, i in self.devices if name == ia_name), 0)
+
+        if monitor_name == "(Ninguno)":
+            ia_devs = ia_id
+        else:
+            monitor_id = next((i for name, i in self.devices if name == monitor_name), None)
+            if monitor_id is not None and monitor_id != ia_id:
+                ia_devs = [ia_id, monitor_id]
+            else:
+                ia_devs = ia_id
+
+        return speaker_id, ia_devs
 
     def change_mode(self, filename):
-        with open(os.path.join(self.promt_folder, filename), "r", encoding="utf-8") as f:
+        path = os.path.join(self.promt_folder, filename)
+        with open(path, "r", encoding="utf-8") as f:
             self.current_prompt = f.read()
-        self.log(f"🎭  Prompt: {filename}")
+        self.log(f"🎭 Prompt cargado: {filename}")
 
     def connect_twitch(self):
         def run():
-            token   = self._config.get("TWITCH_TOKEN", "")
-            nick    = self._config.get("NICK", "")
-            channel = self._config.get("CHANNEL", "")
-            api_key = self._config.get("GROQ_API_KEY", "")
+            token   = config.get("TWITCH_TOKEN", "")
+            nick    = config.get("NICK", "")
+            channel = config.get("CHANNEL", "")
+            api_key = config.get("GROQ_API_KEY", "")
             if not token:
-                self.log("❌  Primero conecta tu cuenta de Twitch.")
+                self.log("❌ Falta TWITCH_TOKEN")
                 return
-            self.log(f"🔌  Iniciando bot en #{channel}...")
+            self.log("🔌 Conectando a Twitch...")
             speaker_dev, ia_dev = self.get_devices()
-            try:
-                start_chat(self, token, nick, channel, api_key, speaker_dev, ia_dev, self)
-                self.after(0, self.log, f"✅  Bot activo en #{channel}")
-            except Exception as e:
-                self.after(0, self.log, f"❌  Error: {e}")
+            start_chat(self, token, nick, channel, api_key, speaker_dev, ia_dev, self)
         threading.Thread(target=run, daemon=True).start()
+
+    # ==================================================================
+    #  GAME WATCHER
+    # ==================================================================
+    def toggle_watcher(self):
+        if self.game_watcher and self.game_watcher.activo:
+            self.game_watcher.detener()
+            self.btn_watcher.configure(text="▶ Iniciar Comentarista", fg_color="green")
+            self.log("🎮 Comentarista detenido")
+        else:
+            if GameWatcher is None:
+                self.log("❌ game_watcher.py no encontrado o falta instalar pillow")
+                return
+            try:
+                intervalo = int(self.intervalo_var.get())
+            except ValueError:
+                intervalo = 30
+
+            self.game_watcher = GameWatcher(
+                api_key=config.get("GROQ_API_KEY", ""),
+                speak_fn=speak,
+                stop_audio_fn=stop_audio,
+                get_devices_fn=self.get_devices,
+                current_prompt_fn=lambda: self.current_prompt,
+                intervalo=intervalo,
+                voice="es-MX-DaliaNeural",
+                log_fn=self.log,
+            )
+            self.game_watcher.iniciar()
+            self.btn_watcher.configure(text="⏹ Detener Comentarista", fg_color="red")
+            self.log(f"🎮 Comentarista iniciado (cada {intervalo}s)")
+
+    # ==================================================================
+    #  TRADUCTOR
+    # ==================================================================
+    def _get_translator(self) -> "TranslatorManager | None":
+        """Crea el TranslatorManager si no existe todavía."""
+        if TranslatorManager is None:
+            self.log("❌ Traductor no disponible. Instala: pip install pillow")
+            return None
+        if self.translator is None:
+            try:
+                intervalo = int(self.trad_intervalo_var.get())
+            except ValueError:
+                intervalo = 4
+            self.translator = TranslatorManager(
+                master=self,
+                api_key=config.get("GROQ_API_KEY", ""),
+                speak_fn=speak,
+                stop_audio_fn=stop_audio,
+                get_devices_fn=self.get_devices,
+                voice="es-MX-DaliaNeural",
+                idioma_destino=self.idioma_var.get(),
+                log_fn=self.log,
+                leer_en_voz=self.leer_voz_var.get(),
+            )
+            self.translator.intervalo = intervalo
+        else:
+            # Actualizar preferencias en caliente
+            self.translator.idioma_destino = self.idioma_var.get()
+            self.translator.leer_en_voz    = self.leer_voz_var.get()
+            try:
+                self.translator.intervalo = int(self.trad_intervalo_var.get())
+            except ValueError:
+                pass
+        return self.translator
+
+    def trad_area_unica(self):
+        """Selecciona área y traduce una sola vez."""
+        t = self._get_translator()
+        if t:
+            self.log("📐 Dibuja el área a traducir...")
+            t.seleccionar_area_y_traducir()
+
+    def trad_pantalla_unica(self):
+        """Captura pantalla completa y traduce una sola vez."""
+        t = self._get_translator()
+        if t:
+            self.log("🖥️ Traduciendo pantalla completa...")
+            t.traducir_ahora(bbox=None)
+
+    def trad_continuo_area(self):
+        """Selecciona área y activa traducción continua."""
+        t = self._get_translator()
+        if t:
+            if t.activo:
+                self.log("⚠️ Ya hay una traducción continua activa. Detenla primero.")
+                return
+            self.log("📐 Dibuja el área para traducción continua...")
+            t.seleccionar_area_continuo()
+            self.btn_detener_trad.configure(state="normal")
+            self.btn_continuo_area.configure(fg_color="orange")
+            self.btn_continuo_full.configure(fg_color="orange")
+
+    def trad_continuo_full(self):
+        """Pantalla completa en modo continuo."""
+        t = self._get_translator()
+        if t:
+            if t.activo:
+                self.log("⚠️ Ya hay una traducción continua activa. Detenla primero.")
+                return
+            t.area_fija = None
+            t.iniciar_continuo()
+            self.btn_detener_trad.configure(state="normal")
+            self.btn_continuo_area.configure(fg_color="orange")
+            self.btn_continuo_full.configure(fg_color="orange")
+
+    def detener_traduccion(self):
+        if self.translator:
+            self.translator.detener_continuo()
+        self.btn_detener_trad.configure(state="disabled")
+        self.btn_continuo_area.configure(fg_color="#1f6aa5")
+        self.btn_continuo_full.configure(fg_color="#1f6aa5")
 
 
 if __name__ == "__main__":
     try:
         app = App()
         app.mainloop()
-    except Exception:
+    except Exception as e:
         print("\n========== ERROR AL INICIAR ==========")
         traceback.print_exc()
         print("======================================")
