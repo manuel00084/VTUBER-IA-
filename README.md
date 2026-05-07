@@ -1,10 +1,19 @@
+<p align="center">
+![Logo](https://i.postimg.cc/PxLbTvCX/9302f3e1-ad66-4197-87fa-f9372e76a239.png)
+</p>
+
+<h1 align="center">VTUBER IA</h1>
+
+<p align="center">
+Sistema VTuber con IA, voz y Twitch
+</p>
 
 
-Proyecto creado por Manuel0084
-
+<p align="center">
 VTUBER IA busca crear una plataforma accesible y modular para VTubers con inteligencia artificial, permitiendo interacción en tiempo real con usuarios de Twitch mediante voz, chat e IA conversacional.
 siendo un sistema VTuber con integración de IA, voz TTS, interacción con Twitch y soporte para prompts personalizados.
 El objetivo principal es combinar:
+</p>
 
 🤖 Inteligencia artificial
 🔊 Síntesis de voz
@@ -24,6 +33,10 @@ Automatización de stream
 Sistemas de recompensas y eventos
 
 La meta es desarrollar una VTuber IA capaz de interactuar con la comunidad de forma natural y entretenida, manteniendo una arquitectura abierta y fácil de expandir.
+
+Proyecto creado por Manuel0084
+
+
 -------------------------------------------------------------------------------------------------
 ✨ Características
 🤖 Integración con IA usando Groq
