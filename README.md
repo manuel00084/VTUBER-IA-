@@ -11,6 +11,7 @@
 <p align="center">
   Sistema VTuber experimental con integración de IA conversacional,
   Text To Speech, Speech To Text e interacción en tiempo real con Twitch.
+  Un Complemento Para Vmagicmirro, Vseeface. VtubeStudio, PNGTuber Plus, ETC.
 </p>
 
 <p align="center">
