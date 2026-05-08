@@ -29,7 +29,7 @@
 # 📸 Preview
 
 <p align="center">
-  <img src="https://i.postimg.cc/05wrv0yR/Captura-de-pantalla-2026-05-06-181920.png" width="550">
+  <img src="https://i.postimg.cc/W4QqwdYw/imagen-2026-05-07-183746524.png)" width="550">
 </p>
 
 ---
