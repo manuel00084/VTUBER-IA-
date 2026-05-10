@@ -127,6 +127,15 @@ Features may change frequently.
 
 ---
 
+# 📜 Licencia
+
+El código fuente está bajo licencia Apache 2.0.
+
+Los assets visuales, personajes, branding y contenido artístico
+están protegidos bajo una licencia separada.
+
+---
+
 # 👤 Credits
 
 <p align="center">
