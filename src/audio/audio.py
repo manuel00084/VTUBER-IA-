@@ -4,6 +4,8 @@ import asyncio
 import edge_tts
 import tempfile
 import os
+import requests
+import json
 
 import numpy as np
 import sounddevice as sd
@@ -61,11 +63,11 @@ def _play_on_device(data, src_fs, device):
         try:
             sd.play(d, dev_rate, device=device, blocking=True)
         except Exception as e1:
-            print(f"⚠️ Reintentando dispositivo {device} a 48000Hz: {e1}")
+            print(f"WARNING Retrying device {device} at 48000Hz: {e1}")
             d2 = resample_audio(data, src_fs, 48000)
             sd.play(d2, 48000, device=device, blocking=True)
     except Exception as e:
-        print(f"❌ Error reproduciendo en device {device}: {e}")
+        print(f"ERROR playing in device {device}: {e}")
 
 
 def _play_multi(data, fs, devices):
@@ -123,7 +125,7 @@ def audio_worker():
                 data, fs = sf.read(path, dtype='float32')
                 _play_multi(data, fs, dev_list)
             except Exception as e:
-                print("❌ Error reproduccion:", e)
+                print("ERROR playing audio:", e)
 
             try:
                 os.remove(path)
@@ -131,7 +133,7 @@ def audio_worker():
                 pass
 
         except Exception as e:
-            print("❌ Worker error:", e)
+            print("ERROR Worker error:", e)
 
 
 def stop_audio():
@@ -141,9 +143,65 @@ def stop_audio():
         pass
 
 
+def speak_fish_audio(text, voice, device=0):
+    """Generate TTS using Fish Audio API"""
+    try:
+        from src.core.config import load_config
+        config_dict = load_config()
+        api_key = config_dict.get("FISH_API_KEY", "")
+        
+        if not api_key:
+            print("ERROR Fish Audio API Key not configured")
+            return False
+            
+        url = "https://api.fish.audio/v1/tts"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "text": text,
+            "model": "suno"
+        }
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code != 200:
+            print(f"ERROR Fish Audio API error: {response.status_code} - {response.text}")
+            return False
+        
+        # Save audio to temp file and play it
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
+            f.write(response.content)
+            temp_path = f.name
+            
+            try:
+                data, fs = sf.read(temp_path, dtype='float32')
+                _play_multi(data, fs, [device] if isinstance(device, int) else device)
+            except Exception as e:
+                print(f"ERROR playing Fish Audio: {e}")
+            finally:
+                try:
+                    os.remove(temp_path)
+                except:
+                    pass
+        
+        return True
+        
+    except Exception as e:
+        print(f"ERROR in Fish Audio TTS: {e}")
+        return False
+
+
 def speak(text, voice="es-ES-AlvaroNeural", device=0):
     """device puede ser int (un dispositivo) o lista [dev1, dev2, ...]."""
     try:
-        audio_queue.put((text, voice, device))
+        if voice.startswith("fish_"):
+            success = speak_fish_audio(text, voice, device)
+            if not success:
+                audio_queue.put((text, "es-ES-AlvaroNeural", device))
+        else:
+            audio_queue.put((text, voice, device))
     except Exception as e:
-        print("❌ Error speak:", e)
+        print("ERROR speak:", e)
