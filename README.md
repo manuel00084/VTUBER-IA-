@@ -38,11 +38,13 @@
 #  Video 
 
 <p align="center">
-<video src="video/4meplayer.online/#j5qqe)" controls="controls" width="100"></video>
+<video src="video/20260509_SuperPowerfulLlamaOptimizePrime-Jm1nvVWjvSksb0pp_source.mp4)" controls="controls" width="100"></video>
 </p>
 <p>
-<iframe src="https://karinvtuber-ia-.4meplayer.online/#j5qqe" width="100%" height="100%" frameborder="0" allowfullscreen></iframe>
+<iframe src="video/20260509_SuperPowerfulLlamaOptimizePrime-Jm1nvVWjvSksb0pp_source.mp4" width="100%" height="100%" frameborder="0" allowfullscreen></iframe>
 </p>
+
+[![](https://markdown-videos.deta.dev/video/20260509_SuperPowerfulLlamaOptimizePrime-Jm1nvVWjvSksb0pp_source.mp4)](https://youtu.be/NarBox1LkYc)
 
 # ✨ Features
 
