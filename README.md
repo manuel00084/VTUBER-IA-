@@ -37,7 +37,9 @@
 
 #  Video 
 
-video src="https://karinvtuber-ia-.4meplayer.online/#j5qqe)" controls="controls" width="600"></video>
+<p align="center">
+video src="video/4meplayer.online/#j5qqe)" controls="controls" width="100"></video>
+</p>
 
 ---
 
