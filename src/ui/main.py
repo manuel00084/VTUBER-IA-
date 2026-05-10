@@ -4,6 +4,9 @@ import threading, os, traceback, webbrowser, requests
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
+APP_VERSION = "0.9.0-beta"
+APP_NAME = "Karin VTuber -IA-"
+
 from src.core.config import load_config
 from src.audio import audio_worker, speak, stop_audio, get_output_devices
 from src.ai import ask_groq, ask_cerebras, ask_ai
@@ -52,7 +55,7 @@ class App(ctk.CTk):
         print("App.__init__ started")
         super().__init__()
         print("super().__init__ done")
-        self.title("Karin VTuber -IA-")
+        self.title(f"{APP_NAME} v{APP_VERSION}")
         print("title set")
         self.geometry("920x650")
         print("geometry set")
@@ -183,13 +186,12 @@ class App(ctk.CTk):
         # Agregar logo
         try:
             logo_path = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "logo", "avatar.png")
-            logo_img = ctk.CTkImage(light_image=Image.open(logo_path), size=(50, 50))
-            ctk.CTkLabel(hdr, image=logo_img, text="").pack(anchor="center", pady=(0, 5))
+            logo_img = ctk.CTkImage(light_image=Image.open(logo_path), size=(80, 80))
+            ctk.CTkLabel(hdr, image=logo_img, text="").pack(anchor="center", pady=(0, 8))
         except Exception as e:
             print(f"Error cargando logo: {e}")
         
-        lb(hdr, "Karin VTuber -IA-", sz=15, bold=True, col="#ff69b4").pack(anchor="center")
-        lb(hdr, "by Manuel0084", sz=9, col=MUT).pack(anchor="center")
+        lb(hdr, "Karin VTuber -IA-", sz=16, bold=True, col="#ff69b4").pack(anchor="center")
 
         ctk.CTkFrame(sb, height=1, fg_color=BORD).grid(row=1, column=0, sticky="ew", padx=8)
 
@@ -201,6 +203,7 @@ class App(ctk.CTk):
             ("Voz PTT",      "ptt"),
             ("Bot Speaker",  "bot_speaker"),
             ("API_KEY",      "api_key"),
+            ("Creditos",    "creditos"),
         ]
         
         for i, (txt, key) in enumerate(buttons):
@@ -219,17 +222,6 @@ class App(ctk.CTk):
             hover_color="#7c58c0", font=("Arial", 11, "bold"), corner_radius=8,
             height=30, command=self.connect_twitch)
         self.twitch_btn.grid(row=10, column=0, padx=8, pady=(4, 4), sticky="ew")
-
-        # Enlaces
-        c1 = ctk.CTkLabel(sb, text="Creditos by Manuel0084", font=("Arial", 9),
-                          text_color=MUT, cursor="hand2")
-        c1.grid(row=11, column=0, pady=(6, 2))
-        c1.bind("<Button-1>", lambda e: webbrowser.open("https://github.com/manuel00084/Karin-VTuber--IA-"))
-
-        c2 = ctk.CTkLabel(sb, text="twitch.tv/manuel0084", font=("Arial", 9),
-                         text_color=MUT, cursor="hand2")
-        c2.grid(row=13, column=0, pady=(0, 12))
-        c2.bind("<Button-1>", lambda e: webbrowser.open("https://www.twitch.tv/manuel0084"))
 
     def _tab(self, key):
         for k, b in self._nav_btns.items():
@@ -288,6 +280,7 @@ class App(ctk.CTk):
             "ptt":          self._tab_ptt(area),
             "bot_speaker":  self._tab_bot_speaker(area),
             "api_key":      self._tab_api_key(area),
+            "creditos":     self._tab_creditos(area),
         }
         self._tab("panel")
         self._nav_btns["panel"].configure(fg_color=CARD2, text_color=TXT)
@@ -436,6 +429,58 @@ class App(ctk.CTk):
                 bx.set(vals[0])
             setattr(self, attr, bx)
         ctk.CTkFrame(c, height=6, fg_color="transparent").pack()
+        
+        # Equalizador
+        eq_frame = mk(tab, fg_color=CARD2)
+        eq_frame.pack(fill="x", padx=14, pady=(12, 6))
+        lb(eq_frame, "🎛  Equalizador de voz IA", sz=12, bold=True).pack(anchor="w", padx=10, pady=(10, 4))
+        
+        # Graves (Bass)
+        bass_frame = ctk.CTkFrame(eq_frame, fg_color="transparent")
+        bass_frame.pack(fill="x", padx=10, pady=(4, 4))
+        lb(bass_frame, "🎸 Graves (Bass):", sz=10, col=MUT).pack(side="left")
+        self.bass_var = ctk.IntVar(value=config.get("EQ_BASS", 0))
+        bass_slider = ctk.CTkSlider(bass_frame, from_=-12, to=12, number_of_steps=24,
+                                  variable=self.bass_var, fg_color=CARD, progress_color=BORD)
+        bass_slider.pack(side="left", fill="x", expand=True, padx=(8, 8))
+        lb(bass_frame, "0", sz=9, col=MUT, width=30).pack(side="right")
+        
+        # Agudos (Treble)
+        treble_frame = ctk.CTkFrame(eq_frame, fg_color="transparent")
+        treble_frame.pack(fill="x", padx=10, pady=(0, 4))
+        lb(treble_frame, "🎵 Agudos (Treble):", sz=10, col=MUT).pack(side="left")
+        self.treble_var = ctk.IntVar(value=config.get("EQ_TREBLE", 0))
+        treble_slider = ctk.CTkSlider(treble_frame, from_=-12, to=12, number_of_steps=24,
+                                  variable=self.treble_var, fg_color=CARD, progress_color=BORD)
+        treble_slider.pack(side="left", fill="x", expand=True, padx=(8, 8))
+        lb(treble_frame, "0", sz=9, col=MUT, width=30).pack(side="right")
+        
+        # Velocidad (Speed)
+        speed_frame = ctk.CTkFrame(eq_frame, fg_color="transparent")
+        speed_frame.pack(fill="x", padx=10, pady=(0, 4))
+        lb(speed_frame, "⚡ Velocidad:", sz=10, col=MUT).pack(side="left")
+        self.speed_var = ctk.IntVar(value=config.get("EQ_SPEED", 0))
+        speed_slider = ctk.CTkSlider(speed_frame, from_=-50, to=50, number_of_steps=100,
+                                    variable=self.speed_var, fg_color=CARD, progress_color=BORD)
+        speed_slider.pack(side="left", fill="x", expand=True, padx=(8, 8))
+        lb(speed_frame, "0%", sz=9, col=MUT, width=30).pack(side="right")
+        
+        # Auto-Tune
+        autotune_frame = ctk.CTkFrame(eq_frame, fg_color="transparent")
+        autotune_frame.pack(fill="x", padx=10, pady=(0, 4))
+        lb(autotune_frame, "🎤 Auto-Tune:", sz=10, col=MUT).pack(side="left")
+        self.autotune_var = ctk.IntVar(value=config.get("EQ_AUTOTUNE", 0))
+        autotune_slider = ctk.CTkSlider(autotune_frame, from_=0, to=100, number_of_steps=100,
+                                    variable=self.autotune_var, fg_color=CARD, progress_color=BORD)
+        autotune_slider.pack(side="left", fill="x", expand=True, padx=(8, 8))
+        lb(autotune_frame, "0%", sz=9, col=MUT, width=30).pack(side="right")
+        
+        # Botón guardar ecualizador
+        eq_btn = ctk.CTkButton(eq_frame, text="💾 Guardar EQ", fg_color=GRN, text_color=GRN_T,
+                              height=26, corner_radius=6, hover_color="#22c55e",
+                              command=self._guardar_eq)
+        eq_btn.pack(padx=10, pady=(8, 10))
+        
         return tab
 
     # ════════════════════════════════════════════════════════════════════════
@@ -928,6 +973,20 @@ class App(ctk.CTk):
         self._ia_voice = voice
         self.log(f"✅  Guardado IA: {command} ({voice})")
 
+    def _guardar_eq(self):
+        from src.core.config import load_config, save_config
+        cfg = load_config()
+        cfg["EQ_BASS"] = self.bass_var.get()
+        cfg["EQ_TREBLE"] = self.treble_var.get()
+        cfg["EQ_SPEED"] = self.speed_var.get()
+        cfg["EQ_AUTOTUNE"] = self.autotune_var.get()
+        save_config(cfg)
+        config["EQ_BASS"] = self.bass_var.get()
+        config["EQ_TREBLE"] = self.treble_var.get()
+        config["EQ_SPEED"] = self.speed_var.get()
+        config["EQ_AUTOTUNE"] = self.autotune_var.get()
+        self.log(f"✅  EQ: Graves={self.bass_var.get()}, Agudos={self.treble_var.get()}, Vel={self.speed_var.get()}%, Auto-Tune={self.autotune_var.get()}%")
+
     def _guardar_cere(self):
         value = self.cere_key_entry.get().strip()
         if not value:
@@ -1009,7 +1068,134 @@ class App(ctk.CTk):
         except Exception as e:
             self.log(f"❌  {provider} error: {e}")
 
-    # ════════════════════════════════════════════════════════════════════════
+    def _tab_creditos(self, parent):
+        tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
+        c = mk(tab)
+        c.pack(fill="x", padx=14, pady=(12, 6))
+        
+        # Título con versión
+        lb(c, f"📋 {APP_NAME}", sz=18, bold=True, col="#ff69b4").pack(anchor="w", padx=10, pady=(10, 4))
+        lb(c, f"Versión {APP_VERSION}", sz=12, col=MUT).pack(anchor="w", padx=10, pady=(0, 10))
+        
+        # Descripción
+        desc_frame = mk(tab, fg_color=CARD2)
+        desc_frame.pack(fill="x", padx=14, pady=(0, 8))
+        lb(desc_frame, "🎤 Asistente VTuber con IA", sz=13, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
+        lb(desc_frame, "Bot de Twitch con Chat IA, traductor en tiempo real, voz PTT y más.", sz=11, col=MUT).pack(anchor="w", padx=10, pady=(0, 4))
+        
+        # Características
+        feat_frame = mk(tab, fg_color=CARD2)
+        feat_frame.pack(fill="x", padx=14, pady=(0, 8))
+        lb(feat_frame, "✨ Características", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
+        features = [
+            "🤖 Chat IA con Cerebras/Groq",
+            "🔊 Voces Edge TTS y Fish Audio",
+            "🎛 Equalizador de voz (graves, agudos, velocidad, auto-tune)",
+            "😀 Detección de emociones",
+            "🌍 Traductor en tiempo real",
+            "🎤 Voz PTT con Vosk",
+            "📺 Monitor de juego",
+            "🎮 Game watcher",
+        ]
+        for f in features:
+            lb(feat_frame, f"  • {f}", sz=11, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        
+        # Créditos
+        cred_frame = mk(tab, fg_color=CARD2)
+        cred_frame.pack(fill="x", padx=14, pady=(0, 8))
+        lb(cred_frame, "📌 Créditos", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
+        lb(cred_frame, "  Desarrollado por Manuel0084", sz=11, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(cred_frame, "  GitHub: github.com/manuel00084", sz=11, col="#93c5fd", cursor="hand2").pack(anchor="w", padx=10, pady=(2, 0))
+        
+        # Aviso legal
+        legal_frame = mk(tab, fg_color=CARD2)
+        legal_frame.pack(fill="x", padx=14, pady=(0, 8))
+        lb(legal_frame, "⚖️ Licencia", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
+        
+        lb(legal_frame, "  Licensed under the Apache License, Version 2.0", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        apache_link = lb(legal_frame, "  http://www.apache.org/licenses/LICENSE-2.0", sz=10, col="#93c5fd", cursor="hand2")
+        apache_link.pack(anchor="w", padx=10, pady=(2, 0))
+        apache_link.bind("<Button-1>", lambda e: webbrowser.open("http://www.apache.org/licenses/LICENSE-2.0"))
+        
+        lb(legal_frame, "", sz=10).pack(anchor="w", padx=10, pady=(4, 0))
+        lb(legal_frame, "  Copyright 2024 Manuel0084", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        
+        # Términos legales completos
+        terms_frame = mk(tab, fg_color=CARD2)
+        terms_frame.pack(fill="both", expand=True, padx=14, pady=(0, 8))
+        lb(terms_frame, "📜 Términos Legales", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
+        
+        terms_text = """Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+"License" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
+"Licensor" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
+"You" (or "Your") shall mean an individual or Legal Entity exercising permissions granted by this License.
+"Work" shall mean the work of authorship, whether in Source or Object form, made available under the License.
+"Derivative Works" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work.
+
+2. Grant of Copyright License.
+Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work.
+
+3. Grant of Patent License.
+Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable patent license.
+
+4. Redistribution.
+You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, provided that You meet the following conditions:
+(a) You must give any other recipients of the Work or Derivative Works a copy of this License; and
+(b) You must cause any modified files to carry prominent notices stating that You changed the files.
+
+5. Submission of Contributions.
+Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License.
+
+6. Trademarks.
+This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor.
+
+7. Disclaimer of Warranty.
+Unless required by applicable law or agreed to in writing, Licensor provides the Work on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND.
+
+8. Limitation of Liability.
+In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, shall any Contributor be liable to You for damages.
+
+9. Accepting Warranty or Additional Liability.
+While redistributing the Work, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations.
+
+END OF TERMS AND CONDITIONS"""
+        
+        terms_box = ctk.CTkTextbox(terms_frame, fg_color=BG, text_color=TXT, font=("Consolas", 9))
+        terms_box.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        terms_box.insert("1.0", terms_text)
+        terms_box.configure(state="disabled")
+        
+        # Third Party Licenses
+        third_party_frame = mk(tab, fg_color=CARD2)
+        third_party_frame.pack(fill="x", padx=14, pady=(0, 8))
+        lb(third_party_frame, "📦 Third Party Licenses", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
+        
+        lb(third_party_frame, "Este proyecto utiliza software y modelos de terceros.", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(third_party_frame, "", sz=10).pack(anchor="w", padx=10, pady=(2, 0))
+        
+        lb(third_party_frame, "Vosk", sz=11, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(third_party_frame, "  Proyecto: https://alphacephei.com/vosk/", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(third_party_frame, "  Licencia: Apache 2.0", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        
+        lb(third_party_frame, "", sz=10).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(third_party_frame, "Otros componentes", sz=11, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(third_party_frame, "  Cada librería y modelo mantiene su licencia original.", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        
+        lb(third_party_frame, "  Edge TTS - Microsoft", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(third_party_frame, "  CustomTkinter - MIT", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(third_party_frame, "  TwitchIO - MIT", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(third_party_frame, "  Groq/Cerebras API - Proprietary", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(third_party_frame, "  Fish Audio - Proprietary", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        
+        return tab
+
+    # ═════════════════════════════��══════════════════════════════════════════
     #  LÓGICA
     # ════════════════════════════════════════════════════════════════════════
     def log(self, text):
@@ -1116,7 +1302,7 @@ class App(ctk.CTk):
     def ptt_click(self):
         def run():
             try:
-                from stt import listen
+                from src.audio.stt import listen
                 stop_audio(); self.log("🎤  Escuchando...")
                 text = listen()
                 if not text: self.log("❌  No se entendió"); return
