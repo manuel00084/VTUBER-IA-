@@ -37,7 +37,8 @@
 
 #  Video 
 
-<iframe src="https://karinvtuber-ia-.4meplayer.online/#j5qqe" width="100%" height="100%" frameborder="0" allowfullscreen></iframe>
+video src="https://karinvtuber-ia-.4meplayer.online/#j5qqe)" controls="controls" width="600"></video>
+
 ---
 
 # ✨ Features
