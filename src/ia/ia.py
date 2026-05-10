@@ -127,9 +127,14 @@ def ask_groq(text, api_key, prompt, max_caracteres=500, reintentos=3):
 def ask_cerebras(text, api_key, prompt, max_caracteres=500, reintentos=3):
     return ask_ai(text, api_key, prompt, provider="cerebras", max_caracteres=max_caracteres, reintentos=reintentos)
 
+GROQ_VISION_MODELOS = [
+    "llava-v1.5-7b-4096-preview",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+]
+
 def ask_vision(image_b64, texto, api_key, prompt, modelo_idx=0, log=print):
     """Traduce/detecta texto en imagen usando Groq Vision."""
-    modelo = GROQ_MODELOS[modelo_idx % len(GROQ_MODELOS)]
+    modelo = GROQ_VISION_MODELOS[modelo_idx % len(GROQ_VISION_MODELOS)]
     headers = {
         "Authorization": f"Bearer {api_key.strip()}",
         "Content-Type": "application/json"
@@ -152,6 +157,8 @@ def ask_vision(image_b64, texto, api_key, prompt, modelo_idx=0, log=print):
                           json=data, headers=headers, timeout=30)
         if r.status_code == 429:
             return None, modelo_idx, True
+        if r.status_code == 400:
+            return None, modelo_idx + 1, False
         if r.status_code != 200:
             return None, modelo_idx, False
         return r.json()["choices"][0]["message"]["content"].strip(), modelo_idx, False

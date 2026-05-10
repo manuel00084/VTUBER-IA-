@@ -118,7 +118,6 @@ def get_context(memory, user):
 
     contexto = ""
 
-    # 💖 estado emocional
     if mood >= 3:
         contexto += "El usuario te cae muy bien.\n"
     elif mood >= 1:
@@ -137,3 +136,11 @@ def get_context(memory, user):
         contexto += "\n".join(hist)
 
     return contexto
+
+
+def clear_memory():
+    try:
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            json.dump({}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("❌ Error borrando memoria:", e)
