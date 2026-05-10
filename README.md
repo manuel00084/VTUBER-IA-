@@ -37,8 +37,11 @@
 
 #  Video 
 
-<p align="center" width="100%">
-  <video src="video/20260509_SuperPowerfulLlamaOptimizePrime-Jm1nvVWjvSksb0pp_source.mp4" width="80%" controls></video>
+<p align="center">
+  <video src="https://github.com/manuel00084/Karin-VTuber--IA/video/20260509_SuperPowerfulLlamaOptimizePrime-Jm1nvVWjvSksb0pp_source.mp4"
+         controls
+         width="800">
+  </video>
 </p>
 
 # ✨ Features
