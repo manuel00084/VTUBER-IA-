@@ -51,8 +51,7 @@ def start_chat(app, token, nick, channel, api_key, speaker_dev, ia_dev, gui_app)
                     user    = message.author.name.lower()
                     content = message.content.strip()
 
-                    await self.handle_commands(message)
-
+                    # Manejar comandos manualmente (sin registry de twitchio)
                     if content.lower().startswith("!sp "):
                         texto = content[4:].strip()
                         if texto:
