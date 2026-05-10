@@ -151,7 +151,7 @@ están protegidos bajo una licencia separada.
 
 <p align="center">
   💻 GitHub:
-  <a href="https://github.com/manuel00084/VTUBER-IA-">
+  <a href="https://github.com/manuel00084/Karin-VTuber--IA--">
     VTUBER-IA
   </a>
 </p>
