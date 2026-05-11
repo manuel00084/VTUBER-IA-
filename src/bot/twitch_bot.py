@@ -11,6 +11,13 @@ from src.ai.memory import (
     get_context, update_mood
 )
 
+twitch_messages_buffer = []
+TWITCH_BUFFER_MAX = 50
+
+
+def get_twitch_messages():
+    return twitch_messages_buffer.copy()
+
 
 def start_chat(app, token, nick, channel, api_key, speaker_dev, ia_dev, gui_app):
     """
@@ -50,6 +57,10 @@ def start_chat(app, token, nick, channel, api_key, speaker_dev, ia_dev, gui_app)
 
                     user    = message.author.name.lower()
                     content = message.content.strip()
+
+                    twitch_messages_buffer.append(f"{user}: {content}")
+                    if len(twitch_messages_buffer) > TWITCH_BUFFER_MAX:
+                        twitch_messages_buffer.pop(0)
 
                     # Manejar comandos manualmente (sin registry de twitchio)
                     if content.lower().startswith("!sp "):
@@ -122,19 +133,29 @@ def _procesar_ia(user, texto, mem_data, api_key, gui_app, ia_dev, app):
         if not respuesta or respuesta.strip() == "":
             respuesta = "Hmm, no sé qué decirte ahora mismo..."
 
+        from src.ai.memory import EMOTION_VOICES, EMOTION_PREFIXES
+        
         mood = mem_data[user].get("mood", 0)
-        frases = ["Oye", "Mira", "Escucha", "Sabes"]
-        inicio = random.choice(frases)
-
-        if mood >= 3:
-            mensaje_final = f"{inicio} {user}~ 💖 {respuesta}"
-            voz = "es-MX-DaliaNeural"
-        elif mood <= -3:
-            mensaje_final = f"{inicio} {user}... {respuesta}"
-            voz = "es-ES-ElviraNeural"
-        else:
-            mensaje_final = f"{inicio} {user}... {respuesta}"
-            voz = "es-MX-DaliaNeural"
+        emotion = mem_data[user].get("emotion", 0)
+        
+        # Usar emoción del usuario para elegir voz
+        voz = EMOTION_VOICES.get(emotion, "es-MX-DaliaNeural")
+        inicio = random.choice(EMOTION_PREFIXES.get(emotion, ["Oye", "Mira", "Escucha"]))
+        
+        # Agregar flair según emoción
+        flair = ""
+        if emotion == 1:  # happy
+            flair = "💖 "
+        elif emotion == 2:  # excited
+            flair = "✨ "
+        elif emotion == 3:  # angry
+            flair = "😤 "
+        elif emotion == 4:  # sad
+            flair = "💭 "
+        elif emotion == 5:  # sick
+            flair = "🤒 "
+        
+        mensaje_final = f"{inicio} {user}{flair}{respuesta}"
 
         app.log(f"🤖 IA → {user}: {respuesta}")
 
