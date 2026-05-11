@@ -1,5 +1,5 @@
 import customtkinter as ctk
-import threading, os, traceback, webbrowser, requests
+import threading, os, traceback, webbrowser, requests, base64, time, json
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -10,7 +10,7 @@ APP_NAME = "Karin VTuber -IA-"
 from src.core.config import load_config
 from src.audio import audio_worker, speak, stop_audio, get_output_devices
 from src.ai import ask_groq, ask_cerebras, ask_ai
-from src.bot.twitch_bot import start_chat
+from src.bot.twitch_bot import start_chat, get_twitch_messages
 from src.core.oauth_server import TwitchOAuth, validate_token
 from src.utils.ptt import PTTManager
 from src.utils.game_watcher import GameWatcher
@@ -20,6 +20,255 @@ from PIL import Image
 
 config = load_config()
 
+# ===== SERVICIO DE VISIÓN CENTRALIZADO (PaddleOCR) =====
+class VisionService:
+    def __init__(self):
+        self.running = False
+        self.last_image = None
+        self.last_analysis = {
+            "text": "",
+            "description": "",
+            "game_state": "",
+            "objects": [],
+            "timestamp": 0
+        }
+        self.analysis_interval = 3.0  # segundos entre análisis
+        self.last_analysis_time = 0
+    
+    def start(self):
+        self.running = True
+        threading.Thread(target=self._vision_loop, daemon=True).start()
+    
+    def stop(self):
+        self.running = False
+    
+    def _vision_loop(self):
+        while self.running:
+            try:
+                current_time = time.time()
+                if current_time - self.last_analysis_time >= self.analysis_interval:
+                    self._analyze_screen()
+                    self.last_analysis_time = current_time
+                time.sleep(0.1)
+            except Exception as e:
+                print(f"Vision service error: {e}")
+                time.sleep(1)
+    
+    def _analyze_screen(self):
+        """Análisis de pantalla usando PaddleOCR (gratis, offline)"""
+        try:
+            # Usar Windows Graphics Capture API + PaddleOCR
+            from src.utils.win_capture import capturar_pantalla
+            from src.utils.windows_ocr import reconocer_texto_con_posicion
+            
+            screenshot = capturar_pantalla()
+            
+            if screenshot is None:
+                self.last_analysis = {"text": "Error capturando pantalla", "description": "", "game_state": "", "objects": [], "timestamp": time.time()}
+                return
+            
+            # OCR con PaddleOCR
+            bloques = reconocer_texto_con_posicion(screenshot)
+            
+            if bloques:
+                texto = " ".join([b['original'] for b in bloques])
+                self.last_analysis = {
+                    "text": texto,
+                    "description": f"Se detectaron {len(bloques)} elementos de texto",
+                    "game_state": "",
+                    "objects": [b['original'][:30] for b in bloques[:10]],  # primeros 10 textos
+                    "timestamp": time.time()
+                }
+            else:
+                self.last_analysis = {"text": "", "description": "No se detectó texto", "game_state": "", "objects": [], "timestamp": time.time()}
+                
+        except ImportError as e:
+            self.last_analysis = {"text": f"PaddleOCR no disponible: {e}", "description": "", "game_state": "", "objects": [], "timestamp": time.time()}
+        except Exception as e:
+            self.last_analysis = {"text": f"Error en análisis de visión: {str(e)}", "description": "", "game_state": "", "objects": [], "timestamp": time.time()}
+    
+    def _analyze_with_groq(self, img_base64):
+        """Analizar imagen con Groq Vision"""
+        from src.core.config import load_config
+        cfg = load_config()
+        api_key = cfg.get("GROQ_API_KEY", "")
+        
+        # Prompt para análisis múltiple
+        prompt = """Analiza esta imagen y proporciona:
+1. Texto extraído (OCR) - todo el texto visible
+2. Descripción general de lo que se ve
+3. Estado del juego si es un juego (elementos interactivos, puntuación, etc.)
+4. Lista de objetos/interfaces detectados
+
+Responde en formato JSON:
+{
+  "text": "texto extraído aquí",
+  "description": "descripción general",
+  "game_state": "estado del juego o empty si no es juego",
+  "objects": ["objeto1", "objeto2", ...]
+}"""
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "llama-3.2-11b-vision-preview",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{img_base64}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": 1000
+        }
+        
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            content = result["choices"][0]["message"]["content"]
+            
+            # Intentar parsear como JSON
+            try:
+                import json
+                analysis = json.loads(content)
+                self.last_analysis = {
+                    "text": analysis.get("text", ""),
+                    "description": analysis.get("description", ""),
+                    "game_state": analysis.get("game_state", ""),
+                    "objects": analysis.get("objects", []),
+                    "timestamp": time.time()
+                }
+            except:
+                # Si no es JSON, guardar como texto
+                self.last_analysis = {
+                    "text": content,
+                    "description": content[:200] + "..." if len(content) > 200 else content,
+                    "game_state": "",
+                    "objects": [],
+                    "timestamp": time.time()
+                }
+        else:
+            raise Exception(f"Groq API error: {response.status_code}")
+    
+    def _analyze_with_google(self, img_base64):
+        """Analizar imagen con Google Gemini Vision"""
+        from src.core.config import load_config
+        cfg = load_config()
+        api_key = cfg.get("GOOGLE_AI_API_KEY", "")
+        
+        # Prompt para análisis múltiple
+        prompt = """Analyze this image and provide:
+1. Extracted text (OCR) - all visible text
+2. General description of what you see
+3. Game state if it's a game (interactive elements, score, etc.)
+4. List of detected objects/interfaces
+
+Respond in JSON format:
+{
+  "text": "extracted text here",
+  "description": "general description",
+  "game_state": "game state or empty if not a game",
+  "objects": ["object1", "object2", ...]
+}"""
+        
+        # Google Gemini API endpoint
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key={api_key}"
+        
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inlineData": {
+                            "mimeType": "image/png",
+                            "data": img_base64
+                        }
+                    }
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.2,
+                "topK": 32,
+                "topP": 1,
+                "maxOutputTokens": 1024,
+            }
+        }
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            result = response.json()
+            # Extract text from Gemini response
+            if "candidates" in result and len(result["candidates"]) > 0:
+                candidate = result["candidates"][0]
+                if "content" in candidate and "parts" in candidate["content"]:
+                    parts = candidate["content"]["parts"]
+                    if len(parts) > 0 and "text" in parts[0]:
+                        content = parts[0]["text"]
+                        
+                        # Intentar parsear como JSON
+                        try:
+                            import json
+                            analysis = json.loads(content)
+                            self.last_analysis = {
+                                "text": analysis.get("text", ""),
+                                "description": analysis.get("description", ""),
+                                "game_state": analysis.get("game_state", ""),
+                                "objects": analysis.get("objects", []),
+                                "timestamp": time.time()
+                            }
+                        except:
+                            # Si no es JSON, guardar como texto
+                            self.last_analysis = {
+                                "text": content,
+                                "description": content[:200] + "..." if len(content) > 200 else content,
+                                "game_state": "",
+                                "objects": [],
+                                "timestamp": time.time()
+                            }
+                    else:
+                        raise Exception("No text content in Gemini response")
+                else:
+                    raise Exception("Invalid Gemini response structure")
+            else:
+                raise Exception("No candidates in Gemini response")
+        else:
+            raise Exception(f"Google Gemini API error: {response.status_code}")
+    
+    def get_analysis(self):
+        return self.last_analysis.copy()
+    
+    def get_text_only(self):
+        return self.last_analysis.get("text", "")
+    
+    def get_description(self):
+        return self.last_analysis.get("description", "")
+    
+    def get_game_state(self):
+        return self.last_analysis.get("game_state", "")
+
+vision_service = VisionService()
+
 # Paleta based on avatar.png - Pink/Purple theme
 BG     = "#1a0a1e"; SIDE   = "#150a20"; CARD  = "#2a1040"; CARD2 = "#3a1550"
 BORD   = "#ff69b4"; PURP   = "#ff69b4"
@@ -27,6 +276,7 @@ GRN    = "#166534"; GRN_T  = "#bbf7d0"
 RED    = "#7f1d1d"; RED_T  = "#fca5a5"
 BLU    = "#1e3a5f"; BLU_T  = "#93c5fd"
 AMB    = "#78350f"; AMB_T  = "#fcd34d"
+
 TXT    = "#fce7f3"; MUT    = "#f9a8d4"; LOGBG = "#0f0518"
 
 def mk(p, **k):
@@ -111,18 +361,13 @@ class App(ctk.CTk):
         self.game_watcher = None
         self.translator = None
         
+        # Iniciar servicio de visión
+        vision_service.start()
+        
         # Todas las voces disponibles
         self.voices_all = ["es_ES-ElviraNeural", "es_ES-AlvaroNeural",
                            "es_MX-DaliaNeural", "es_MX-LiaNeural", "es_MX-DarioNeural",
-                           "es_AR-EmiliaNeural", "es_AR-TonoNeural",
-                           "fish_female_1", "fish_male_1", "fish_female_2"]
-        
-        # Mapeo de nombres limpios a IDs internos
-        self.voice_display_names = {
-            "fish_female_1": "Fish Female 1",
-            "fish_male_1": "Fish Male 1",
-            "fish_female_2": "Fish Female 2"
-        }
+                           "es_AR-EmiliaNeural", "es_AR-TonoNeural"]
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -131,6 +376,7 @@ class App(ctk.CTk):
         self._build_content()
 
         # PTT
+        saved_ptt_key = config.get("PTT_KEY", "F9")
         if PTTManager:
             try:
                 self.ptt_obj = PTTManager(
@@ -138,8 +384,8 @@ class App(ctk.CTk):
                     stop_audio=stop_audio, config=config,
                     get_devices=self.get_devices,
                     current_prompt=lambda: self.current_prompt,
-                    key="f9", voice="es-MX-DaliaNeural")
-                self.log("⌨  PTT listo — mantén F9 para hablar")
+                    key=saved_ptt_key.lower(), voice="es-MX-DaliaNeural")
+                self.log(f"⌨  PTT listo — mantén CTRL+{saved_ptt_key} para hablar")
             except Exception as e:
                 self.log(f"⚠  PTT error: {e}")
         else:
@@ -148,32 +394,6 @@ class App(ctk.CTk):
         if not PIL_OK:
             self.log("Comentarista: pip install pillow")
     
-    #Funcion para obtener el ID interno de la voz desde el nombre mostrado
-    def _get_voice_id(self, voice_name):
-        # Buscar en el mapeo inverso (display -> internal)
-        for internal_id, display_name in self.voice_display_names.items():
-            if display_name == voice_name:
-                return internal_id
-        # Si no esta en el mapeo, puede ser el formato viejo (fish_audio_*) o ya estar en formato interno
-        if voice_name.startswith("fish_") and not voice_name.startswith("fish_female") and not voice_name.startswith("fish_male"):
-            # Convertir formato viejo al nuevo
-            return voice_name.replace("fish_audio_", "fish_")
-        return voice_name
-    
-    #Obtener nombre limpio para mostrar desde ID interno
-    def _get_voice_display_name(self, voice_id):
-        # Buscar en el mapeo directo (internal -> display)
-        if voice_id in self.voice_display_names:
-            return self.voice_display_names[voice_id]
-        # Si no esta en el mapeo, puede ser el formato viejo
-        old_id = voice_id.replace("fish_", "fish_audio_")
-        if old_id in self.voice_display_names:
-            return self.voice_display_names[old_id]
-        return voice_id
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  SIDEBAR
-    # ════════════════════════════════════════════════════════════════════════
     def _build_sidebar(self):
         sb = ctk.CTkFrame(self, fg_color=SIDE, corner_radius=0, width=200)
         sb.grid(row=0, column=0, sticky="nsew")
@@ -200,10 +420,9 @@ class App(ctk.CTk):
             ("Panel",        "panel"),
             ("Audio",        "audio"),
             ("Traductor",    "traductor"),
-            ("Voz PTT",      "ptt"),
             ("Bot Speaker",  "bot_speaker"),
             ("API_KEY",      "api_key"),
-            ("Creditos",    "creditos"),
+            ("Creditos",     "creditos"),
         ]
         
         for i, (txt, key) in enumerate(buttons):
@@ -263,21 +482,12 @@ class App(ctk.CTk):
         # Definir todas las voces para usar en el panel
         self.voices_all = ["es_ES-ElviraNeural", "es_ES-AlvaroNeural",
                            "es_MX-DaliaNeural", "es_MX-LiaNeural", "es_MX-DarioNeural",
-                           "es_AR-EmiliaNeural", "es_AR-TonoNeural",
-                           "fish_female_1", "fish_male_1", "fish_female_2"]
-        
-        # Mapeo de nombres limpios a IDs internos
-        self.voice_display_names = {
-            "fish_female_1": "Fish Female 1",
-            "fish_male_1": "Fish Male 1",
-            "fish_female_2": "Fish Female 2"
-        }
+                           "es_AR-EmiliaNeural", "es_AR-TonoNeural"]
 
         self._tabs = {
             "panel":        self._tab_panel(area),
             "audio":        self._tab_audio(area),
             "traductor":    self._tab_traductor(area),
-            "ptt":          self._tab_ptt(area),
             "bot_speaker":  self._tab_bot_speaker(area),
             "api_key":      self._tab_api_key(area),
             "creditos":     self._tab_creditos(area),
@@ -340,14 +550,19 @@ class App(ctk.CTk):
         # PTT rápido
         cv = mk(g, fg_color=CARD2)
         cv.grid(row=0, column=1, sticky="nsew", padx=(5, 0), pady=(0, 5))
-        lb(cv, "🎤  PTT — F9", sz=11, bold=True, col=MUT).pack(anchor="w", padx=10, pady=(8, 4))
+        lb(cv, "🎤  PTT", sz=11, bold=True, col=MUT).pack(anchor="w", padx=10, pady=(8, 4))
         inf = mk(cv, fg_color=CARD)
         inf.pack(fill="x", padx=10, pady=(0, 4))
         ir = ctk.CTkFrame(inf, fg_color="transparent")
         ir.pack(fill="x", padx=8, pady=6)
-        ctk.CTkLabel(ir, text=" F9 ", font=("Consolas", 12, "bold"),
-                     fg_color=BORD, text_color=TXT, corner_radius=5).pack(side="left", padx=(0, 8))
-        lb(ir, "Mantén para hablar", sz=11, col=MUT).pack(side="left")
+        lb(ir, "CTRL +", sz=11, col=TXT).pack(side="left", padx=(0, 4))
+        self.ptt_key_entry = ctk.CTkEntry(ir, width=60, font=("Consolas", 12, "bold"),
+                                           fg_color=BG, text_color=TXT, border_color=BORD,
+                                           justify="center")
+        self.ptt_key_entry.pack(side="left", padx=(0, 8))
+        saved_ptt_key = config.get("PTT_KEY", "F9")
+        self.ptt_key_entry.insert(0, saved_ptt_key)
+        lb(ir, "Mantén para hablar", sz=10, col=MUT).pack(side="left")
         br = ctk.CTkFrame(cv, fg_color="transparent")
         br.pack(fill="x", padx=10, pady=(0, 8))
         br.grid_columnconfigure((0, 1), weight=1)
@@ -371,23 +586,10 @@ class App(ctk.CTk):
         
 # Voz IA
         lb(ia_frame, "Voz para respuestas IA:", sz=11, bold=True).pack(anchor="w", padx=10, pady=(10, 4))
-        # Convertir el valor guardado al nuevo formato si es necesario
         saved_ia_voice = config.get("BOT_IA_VOICE", "es-MX-DaliaNeural")
-        if saved_ia_voice.startswith("fish_audio_"):
-            saved_ia_voice = saved_ia_voice.replace("fish_audio_", "fish_")
-        # Obtener nombre limpio para mostrar
-        display_ia_voice = self._get_voice_display_name(saved_ia_voice)
-        self.ia_voice_var = ctk.StringVar(value=display_ia_voice)
+        self.ia_voice_var = ctk.StringVar(value=saved_ia_voice)
         
-        # Crear lista de voces con nombres limpios para Fish Audio
-        voices_with_display = []
-        for v in self.voices_all:
-            if v.startswith("fish_"):
-                voices_with_display.append(self._get_voice_display_name(v))
-            else:
-                voices_with_display.append(v)
-        
-        self.ia_voice_menu = ctk.CTkOptionMenu(ia_frame, values=voices_with_display,
+        self.ia_voice_menu = ctk.CTkOptionMenu(ia_frame, values=self.voices_all,
                                              variable=self.ia_voice_var,
                                              fg_color=CARD, button_color=BORD, dropdown_fg_color=CARD2,
                                              text_color=TXT, font=("Arial", 11))
@@ -404,7 +606,27 @@ class App(ctk.CTk):
                                    height=28, corner_radius=6,
                                    command=self._test_ia_voice)
         btn_test_ia.pack(padx=10, pady=(0, 10))
-
+        
+        # ── Comentarista ──────────────────────────────────────────────
+        cmt_frame = mk(ia_frame, fg_color=CARD)
+        cmt_frame.pack(fill="x", padx=10, pady=(0, 8))
+        lb(cmt_frame, "🎮  Comentarista de juego", sz=11, bold=True).pack(anchor="w", padx=10, pady=(8, 4))
+        
+        self.comentarista_activo = ctk.BooleanVar(value=False)
+        cmt_switch = ctk.CTkSwitch(cmt_frame, text="Activar comentarista",
+                                    variable=self.comentarista_activo,
+                                    fg_color=CARD2, button_color=PURP,
+                                    progress_color=BORD, font=("Arial", 11),
+                                    command=self.toggle_watcher)
+        cmt_switch.pack(anchor="w", padx=10, pady=(0, 4))
+        
+        saved_leer_chat = config.get("COMENTARISTA_LEER_CHAT", False)
+        self.comentarista_leer_chat = ctk.BooleanVar(value=saved_leer_chat)
+        ctk.CTkSwitch(cmt_frame, text="   Leer chat de Twitch",
+                      variable=self.comentarista_leer_chat,
+                      fg_color=CARD2, button_color=BLU,
+                      progress_color=BORD, font=("Arial", 10)).pack(anchor="w", padx=10, pady=(0, 8))
+        
         return tab
 
     # ════════════════════════════════════════════════════════════════════════
@@ -492,17 +714,26 @@ class App(ctk.CTk):
         c.pack(fill="x", padx=14, pady=(12, 6))
         lb(c, "🈳  Traductor en tiempo real", sz=12, bold=True).pack(anchor="w", padx=10, pady=(10, 6))
 
-        # Traducir a + Motor
+# Traducir a + Motor de traducción
         opt_row = ctk.CTkFrame(c, fg_color="transparent")
         opt_row.pack(fill="x", padx=10, pady=(0, 6))
+        lb(opt_row, "OCR: EasyOCR (offline)", sz=11, col=MUT).pack(side="left", padx=(0, 6))
         lb(opt_row, "Traducir a:", sz=11, col=MUT).pack(side="left", padx=(0, 6))
         self.idioma_var = ctk.StringVar(value="español")
         cb(opt_row, ["español", "inglés", "portugués", "francés", "alemán"],
            variable=self.idioma_var).pack(side="left", padx=(0, 12))
-        lb(opt_row, "Motor:", sz=11, col=MUT).pack(side="left", padx=(0, 6))
-        self.trad_motor = ctk.CTkOptionMenu(opt_row, values=["Groq (OCR)", "Google", "DeepL", "LibreTranslate", "MyMemory"],
-                                            fg_color=CARD, button_color=BORD, dropdown_fg_color=CARD2,
-                                            text_color=TXT, font=("Arial", 11))
+        
+        # Voz para traducción
+        self.leer_voz_var = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(opt_row, text="🔊 Voz", variable=self.leer_voz_var,
+                      fg_color=CARD2, button_color=GRN,
+                      progress_color=BORD, font=("Arial", 10)).pack(side="left", padx=(12, 0))
+        
+        # Motor de traducción (todos gratuitos)
+        lb(opt_row, "Motor:", sz=11, col=MUT).pack(side="left", padx=(12, 6))
+        self.trad_motor = ctk.CTkOptionMenu(opt_row, values=["Google (gratis)", "MyMemory (gratis)"],
+                                             fg_color=CARD, button_color=BORD, dropdown_fg_color=CARD2,
+                                             text_color=TXT, font=("Arial", 11))
         self.trad_motor.pack(side="left", fill="x", expand=True)
         
         g = ctk.CTkFrame(c, fg_color="transparent")
@@ -533,77 +764,6 @@ class App(ctk.CTk):
                                    self.detener_traduccion, h=34)
         self.btn_detener_trad.pack(fill="x", padx=10, pady=(2, 10))
         self.btn_detener_trad.configure(state="disabled")
-        return tab
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  TAB COMENTARISTA
-    # ════════════════════════════════════════════════════════════════════════
-    def _tab_comentarista(self, parent):
-        tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
-
-        c = mk(tab)
-        c.pack(fill="x", padx=14, pady=(12, 6))
-        lb(c, "🎮  Comentarista de juego", sz=12, bold=True).pack(anchor="w", padx=10, pady=(10, 2))
-        lb(c, "Analiza la pantalla con IA y comenta en voz real.", sz=10, col=MUT).pack(
-            anchor="w", padx=10, pady=(0, 8))
-
-        self.watcher_status = ctk.CTkLabel(
-            c, text="⭕  INACTIVO",
-            font=("Arial", 13, "bold"), text_color="#f87171",
-            fg_color=CARD2, corner_radius=8)
-        self.watcher_status.pack(fill="x", padx=10, pady=(0, 8))
-
-        sr = ctk.CTkFrame(c, fg_color="transparent")
-        sr.pack(fill="x", padx=10, pady=(0, 6))
-        lb(sr, "Comentar cada:", sz=11, col=MUT).pack(side="left")
-        self.watcher_intervalo = ctk.IntVar(value=30)
-        self._wlbl2 = lb(sr, "30s", sz=11, bold=True)
-        ctk.CTkSlider(sr, from_=10, to=120, number_of_steps=22,
-                      variable=self.watcher_intervalo, fg_color=BORD,
-                      progress_color=GRN, button_color=GRN, button_hover_color="#22c55e",
-                      command=self._sync_wlbl).pack(side="left", fill="x", expand=True, padx=8)
-        self._wlbl2.pack(side="left", padx=(0, 4))
-
-        lb(c, "📋  Log en tiempo real:", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(4, 0))
-        self.watcher_log = ctk.CTkTextbox(
-            c, height=140, font=("Consolas", 11),
-            fg_color=LOGBG, text_color="#86efac",
-            border_width=0, corner_radius=6)
-        self.watcher_log.pack(fill="x", padx=10, pady=(2, 8))
-
-        self.btn_watcher2 = bt(c, "▶  INICIAR COMENTARISTA", GRN, GRN_T,
-                               self.toggle_watcher, h=46)
-        self.btn_watcher2.pack(fill="x", padx=10, pady=(0, 10))
-
-        inf = mk(tab, fg_color=CARD2)
-        inf.pack(fill="x", padx=14, pady=(0, 10))
-        lb(inf, "ℹ  Requisitos:", sz=11, bold=True).pack(anchor="w", padx=10, pady=(8, 2))
-        lb(inf, "• pip install pillow\n• GROQ_API_KEY en config.txt\n"
-                "• Modelo con visión: llama-4-scout (automático)",
-           sz=10, col=MUT, justify="left").pack(anchor="w", padx=10, pady=(0, 10))
-
-        return tab
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  TAB PTT
-    # ════════════════════════════════════════════════════════════════════════
-    def _tab_ptt(self, parent):
-        tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
-        c = mk(tab)
-        c.pack(fill="x", padx=14, pady=(12, 6))
-        lb(c, "🎤  Voz PTT — Push to Talk", sz=12, bold=True).pack(anchor="w", padx=10, pady=(10, 6))
-        inf = mk(c, fg_color=CARD2)
-        inf.pack(fill="x", padx=10, pady=(0, 8))
-        ir = ctk.CTkFrame(inf, fg_color="transparent")
-        ir.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(ir, text=" F9 ", font=("Consolas", 14, "bold"),
-                     fg_color=BORD, text_color=TXT, corner_radius=6).pack(side="left", padx=(0, 10))
-        lb(ir, "Mantén presionado para hablar con la IA", sz=12, col=MUT).pack(side="left")
-        br = ctk.CTkFrame(c, fg_color="transparent")
-        br.pack(fill="x", padx=10, pady=(0, 10))
-        br.grid_columnconfigure((0, 1), weight=1)
-        bt(br, "🎤  Hablar ahora", GRN,  GRN_T,    self.ptt_click, h=44).grid(row=0, column=0, padx=(0, 4), sticky="ew")
-        bt(br, "🤖  Test IA",     PURP, "#e9d5ff", self.test_ia,   h=44).grid(row=0, column=1, padx=(4, 0), sticky="ew")
         return tab
 
     # ════════════════════════════════════════════════════════════════════════
@@ -643,29 +803,17 @@ class App(ctk.CTk):
         self.cmd_speakmap_entry.pack(fill="x", padx=10, pady=(0, 4))
         self.cmd_speakmap_entry.insert(0, config.get("BOT_SPEAKMAP_CMD", "!spm"))
 
-        # Crear variables de voz con conversion de formato antiguo
         saved_male = config.get("BOT_VOICE_MALE", "es_MX-DarioNeural")
-        if saved_male.startswith("fish_audio_"):
-            saved_male = saved_male.replace("fish_audio_", "fish_")
         saved_female = config.get("BOT_VOICE_FEMALE", "es_MX-DaliaNeural")
-        if saved_female.startswith("fish_audio_"):
-            saved_female = saved_female.replace("fish_audio_", "fish_")
         
-        self.voice_male_var = ctk.StringVar(value=self._get_voice_display_name(saved_male))
+        self.voice_male_var = ctk.StringVar(value=saved_male)
         self.voice_male_menu = ctk.CTkOptionMenu(cmd_frame, values=self.voices_male,
                                               variable=self.voice_male_var,
                                               fg_color=CARD, button_color=BORD, dropdown_fg_color=CARD2,
                                               text_color=TXT, font=("Arial", 11))
         self.voice_male_menu.pack(fill="x", padx=10, pady=(0, 6))
 
-        lb(cmd_frame, "ComandoSpeakMap (voz feminina):", sz=11, bold=True).pack(anchor="w", padx=10, pady=(10, 4))
-        self.cmd_speakmap_entry = ctk.CTkEntry(cmd_frame, placeholder_text="!spm",
-                                              font=("Consolas", 12),
-                                              fg_color=CARD, text_color=TXT, border_color=BORD)
-        self.cmd_speakmap_entry.pack(fill="x", padx=10, pady=(0, 4))
-        self.cmd_speakmap_entry.insert(0, config.get("BOT_SPEAKMAP_CMD", "!spm"))
-
-        self.voice_female_var = ctk.StringVar(value=self._get_voice_display_name(saved_female))
+        self.voice_female_var = ctk.StringVar(value=saved_female)
         self.voice_female_menu = ctk.CTkOptionMenu(cmd_frame, values=self.voices_female,
                                                     variable=self.voice_female_var,
                                                     fg_color=CARD, button_color=BORD, dropdown_fg_color=CARD2,
@@ -807,42 +955,6 @@ class App(ctk.CTk):
         else:
             lb(google_frame, "❌ No configurada", sz=10, col=RED_T).pack(anchor="w", padx=10, pady=(0, 8))
 
-        # === FISH AUDIO ===
-        fish_frame = mk(c, fg_color=CARD2)
-        fish_frame.pack(fill="x", padx=10, pady=(0, 8))
-        lb(fish_frame, "🐟 Fish Audio — TTS y Clonación de Voz", sz=12, col=TXT, bold=True).pack(anchor="w", padx=10, pady=(10, 4))
-
-        self.fish_key_entry = ctk.CTkEntry(fish_frame, placeholder_text="fsch_...",
-                                           font=("Consolas", 12), show="*",
-                                           fg_color=CARD, text_color=TXT, border_color=BORD)
-        self.fish_key_entry.pack(fill="x", padx=10, pady=(0, 6))
-        fish_val = config.get("FISH_API_KEY", "")
-        if fish_val:
-            self.fish_key_entry.insert(0, fish_val)
-
-        btn_fish = ctk.CTkFrame(fish_frame, fg_color="transparent")
-        btn_fish.pack(fill="x", padx=10, pady=(0, 8))
-        btn_fish.grid_columnconfigure((0, 1, 2), weight=1)
-        ctk.CTkButton(btn_fish, text="👁", fg_color=CARD, text_color=TXT,
-                      command=lambda: self._toggle_key(self.fish_key_entry),
-                      height=30, corner_radius=6, width=40).grid(row=0, column=0, padx=(0, 4))
-        ctk.CTkButton(btn_fish, text="💾 Guardar", fg_color=GRN, text_color=GRN_T,
-                      command=lambda: self._guardar_fish(),
-                      height=30, corner_radius=6, hover_color="#22c55e").grid(row=0, column=1, padx=2)
-        ctk.CTkButton(btn_fish, text="🧪 Test", fg_color=PURP, text_color="#e9d5ff",
-                      command=lambda: self._test_api("fish", self.fish_key_entry.get()),
-                      height=30, corner_radius=6).grid(row=0, column=2, padx=(4, 0))
-
-        link_fish = lb(fish_frame, "🌐 https://fish.audio", sz=10, col="#93c5fd", cursor="hand2")
-        link_fish.pack(anchor="w", padx=10, pady=(0, 6))
-        link_fish.bind("<Button-1>", lambda e: webbrowser.open("https://fish.audio"))
-
-        fish_status = config.get("FISH_API_KEY", "")
-        if fish_status and len(fish_status) > 5:
-            lb(fish_frame, f"✅ Guardada (****{fish_status[-6:]})", sz=10, col=GRN_T).pack(anchor="w", padx=10, pady=(0, 8))
-        else:
-            lb(fish_frame, "❌ No configurada", sz=10, col=RED_T).pack(anchor="w", padx=10, pady=(0, 8))
-
         return tab
 
     def _toggle_key(self, entry):
@@ -893,28 +1005,16 @@ class App(ctk.CTk):
         voice_male_display = self.voice_male_var.get()
         voice_female_display = self.voice_female_var.get()
         
-        # Convertir nombre shown al ID interno
-        voice_male = self._get_voice_id(voice_male_display)
-        voice_female = self._get_voice_id(voice_female_display)
-        
-        # Convertir formato de voz solo para Edge TTS, NO para Fish Audio
-        if voice_male.startswith("fish_"):
-            voice_male_edge = voice_male
-        else:
-            voice_male_edge = voice_male.replace("_", "-")
-            
-        if voice_female.startswith("fish_"):
-            voice_female_edge = voice_female
-        else:
-            voice_female_edge = voice_female.replace("_", "-")
+        voice_male_display = self.voice_male_var.get()
+        voice_female_display = self.voice_female_var.get()
+        voice_male_edge = voice_male_display.replace("_", "-")
+        voice_female_edge = voice_female_display.replace("_", "-")
         
         _, device_id = self.get_devices()
         
-        # Test male voice
         self.log("Probando voz masculina...")
         speak("Hola, esta es una prueba de voz masculina", voice_male_edge, device_id)
         
-        # Test female voice after a short delay
         import time
         time.sleep(1)
         
@@ -923,23 +1023,15 @@ class App(ctk.CTk):
 
     def _test_ia_voice(self):
         """Test the selected IA voice"""
-        voice_display = self.ia_voice_var.get()
+        voice = self.ia_voice_var.get()
         command = self.ia_command_entry.get().strip() or "!IA"
-        if not voice_display:
+        if not voice:
             self.log("Selecciona una voz para probar")
             return
         
-        # Convertir nombre shown al ID interno
-        voice = self._get_voice_id(voice_display)
+        voice_edge = voice.replace("_", "-")
         
-        # Convertir formato de voz solo para Edge TTS, NO para Fish Audio
-        if voice.startswith("fish_"):
-            voice_edge = voice
-        else:
-            voice_edge = voice.replace("_", "-")
-        
-        self.log(f"Probando voz IA: {voice_display}")
-        # Use a test phrase in Spanish
+        self.log(f"Probando voz IA: {voice}")
         test_text = "Hola, esta es una prueba de la voz del Bot Chat IA"
         _, device_id = self.get_devices()
         speak(test_text, voice_edge, device_id)
@@ -966,12 +1058,15 @@ class App(ctk.CTk):
         cfg = load_config()
         cfg["BOT_IA_COMMAND"] = command
         cfg["BOT_IA_VOICE"] = voice
+        cfg["COMENTARISTA_LEER_CHAT"] = self.comentarista_leer_chat.get()
         save_config(cfg)
         config["BOT_IA_COMMAND"] = command
         config["BOT_IA_VOICE"] = voice
+        config["COMENTARISTA_LEER_CHAT"] = self.comentarista_leer_chat.get()
         self._ia_command = command
         self._ia_voice = voice
-        self.log(f"✅  Guardado IA: {command} ({voice})")
+        chat_str = "ON" if self.comentarista_leer_chat.get() else "OFF"
+        self.log(f"✅  Guardado IA: {command} ({voice}) | Chat Twitch: {chat_str}")
 
     def _guardar_eq(self):
         from src.core.config import load_config, save_config
@@ -1017,19 +1112,6 @@ class App(ctk.CTk):
         config["GOOGLE_API_KEY"] = value
         self.log(f"GOOGLE_API_KEY guardada correctamente")
 
-    def _guardar_fish(self):
-        value = self.fish_key_entry.get().strip()
-        if not value:
-            self.log("Ingresa una API Key válida")
-            return
-        # Aceptar cualquier API Key que no esté vacía (Fish Audio usa diferentes formatos)
-        from src.core.config import load_config, save_config
-        cfg = load_config()
-        cfg["FISH_API_KEY"] = value
-        save_config(cfg)
-        config["FISH_API_KEY"] = value
-        self.log(f"FISH_API_KEY guardada correctamente")
-
     def _test_api(self, provider, api_key):
         if not api_key:
             self.log(f"Primero guarda la API Key")
@@ -1057,16 +1139,160 @@ class App(ctk.CTk):
                     return
                 self.log(f"✅  Google API Key válida (****{api_key[-6:]})")
                 return
-            elif provider == "fish":
-                # Aceptar cualquier API Key que no esté vacía
-                self.log(f"Fish Audio API Key guardada (****{api_key[-6:]})")
-                return
             if r.status_code == 200:
                 self.log(f"✅  {provider} funcionando correctamente")
             else:
                 self.log(f"❌  {provider} error: {r.status_code}")
         except Exception as e:
             self.log(f"❌  {provider} error: {e}")
+
+    def _tab_game_ia(self, parent):
+        tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
+        c = mk(tab)
+        c.pack(fill="x", padx=14, pady=(12, 6))
+        
+        # Título
+        lb(c, "🎮 Game IA", sz=16, bold=True, col="#ff69b4").pack(anchor="w", padx=10, pady=(10, 4))
+        lb(c, "IA que juega automáticamente en juegos", sz=11, col=MUT).pack(anchor="w", padx=10, pady=(0, 6))
+        
+        # Modo de jugador
+        mode_frame = mk(tab, fg_color=CARD2)
+        mode_frame.pack(fill="x", padx=14, pady=(0, 8))
+        lb(mode_frame, "👤 Modo de Jugador:", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
+        
+        self.game_player_mode = ctk.StringVar(value="player1")
+        
+        ctk.CTkRadioButton(mode_frame, text="Player 1 (Yo)", variable=self.game_player_mode, 
+                          value="player1", fg_color=GRN, text_color=TXT).pack(anchor="w", padx=10, pady=(2, 0))
+        ctk.CTkRadioButton(mode_frame, text="Player 2 (Contrario)", variable=self.game_player_mode,
+                          value="player2", fg_color=RED, text_color=TXT).pack(anchor="w", padx=10, pady=(2, 0))
+        
+        # Captura de pantalla
+        capture_frame = mk(tab, fg_color=CARD2)
+        capture_frame.pack(fill="x", padx=14, pady=(0, 8))
+        lb(capture_frame, "📷 Captura de Pantalla", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
+        
+        btn_capture = ctk.CTkButton(capture_frame, text="📸 Capturar Pantalla", fg_color=CARD, text_color=TXT,
+                                    height=32, corner_radius=8, command=self._capture_screen)
+        btn_capture.pack(fill="x", padx=10, pady=(4, 4))
+        
+        # Controles
+        control_frame = mk(tab, fg_color=CARD2)
+        control_frame.pack(fill="x", padx=14, pady=(0, 8))
+        lb(control_frame, "🎯 Controles", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
+        
+        btn_start = ctk.CTkButton(control_frame, text="▶ Iniciar Game IA", fg_color=GRN, text_color=GRN_T,
+                                   height=36, corner_radius=8, hover_color="#22c55e", command=self._start_game_ia)
+        btn_start.pack(fill="x", padx=10, pady=(4, 4))
+        
+        btn_stop = ctk.CTkButton(control_frame, text="⏹ Detener Game IA", fg_color=RED, text_color="#fff",
+                               height=36, corner_radius=8, hover_color="#dc2626", command=self._stop_game_ia)
+        btn_stop.pack(fill="x", padx=10, pady=(4, 4))
+        
+        # Estado
+        status_frame = mk(tab, fg_color=CARD2)
+        status_frame.pack(fill="x", padx=14, pady=(0, 8))
+        lb(status_frame, "📊 Estado:", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
+        self.game_status_lbl = lb(status_frame, "⏸ Detenido", sz=11, col=RED_T)
+        self.game_status_lbl.pack(anchor="w", padx=10, pady=(0, 4))
+        
+        # Tips
+        tips_frame = mk(tab, fg_color=CARD2)
+        tips_frame.pack(fill="x", padx=14, pady=(0, 8))
+        lb(tips_frame, "💡 Tips:", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
+        lb(tips_frame, "  1. Abre el juego en tu PC", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(tips_frame, "  2. Selecciona Player 1 o Player 2", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(tips_frame, "  3. Presiona 'Capturar' para ver pantalla", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(tips_frame, "  4. Presiona 'Iniciar' para que IA juegue", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        
+        return tab
+
+    def _capture_screen(self):
+        """Mostrar análisis de pantalla del servicio de visión"""
+        try:
+            analysis = vision_service.get_analysis()
+            text = analysis.get("text", "")
+            desc = analysis.get("description", "")
+            game_state = analysis.get("game_state", "")
+            objects = analysis.get("objects", [])
+            
+            result = f"📊 Análisis de pantalla:\n"
+            if text.strip():
+                result += f"📝 Texto: {text[:100]}{'...' if len(text) > 100 else ''}\n"
+            if desc.strip():
+                result += f"👁 Descripción: {desc[:100]}{'...' if len(desc) > 100 else ''}\n"
+            if game_state.strip():
+                result += f"🎮 Estado juego: {game_state}\n"
+            if objects:
+                result += f"🎯 Objetos: {', '.join(objects[:5])}{'...' if len(objects) > 5 else ''}\n"
+            
+            self.log(result if result.strip() != "📊 Análisis de pantalla:" else "⏳ Esperando análisis inicial...")
+        except Exception as e:
+            self.log(f"❌ Error en análisis: {e}")
+
+    def _start_game_ia(self):
+        """Iniciar IA usando servicio de visión"""
+        try:
+            # Forzar un análisis inmediato para tener datos iniciales
+            vision_service._analyze_screen()
+            
+            mode = self.game_player_mode.get()
+            self.game_status_lbl.configure(text=f"▶ Jugando como {mode}", col=GRN_T)
+            self.log(f"🎮 Game IA iniciado: {mode}")
+            
+            # Hilo para jugar usando visión
+            def game_loop():
+                import time
+                last_analysis_time = 0
+                while hasattr(self, '_game_ia_running') and self._game_ia_running:
+                    try:
+                        # Actualizar análisis cada 2 segundos para reducir carga
+                        current_time = time.time()
+                        if current_time - last_analysis_time >= 2.0:
+                            vision_service._analyze_screen()
+                            last_analysis_time = current_time
+                        
+                        # Obtener estado del juego del servicio de visión
+                        analysis = vision_service.get_analysis()
+                        game_state = analysis.get("game_state", "")
+                        
+                        # En modo simple, hacer click basado en análisis básico
+                        # En una implementación más avanzada, esto usaría el game_state para decisiones inteligentes
+                        if game_state and "click" in game_state.lower():
+                            # Simular un click en el centro si detectamos que hay algo para hacer click
+                            import pyautogui
+                            screen_width, screen_height = pyautogui.size()
+                            x, y = screen_width // 2, screen_height // 2
+                            pyautogui.click(x, y)
+                            self.wlog(f"🖱 Click vision en ({x}, {y}) basado en estado: {game_state[:50]}")
+                        elif not game_state or len(game_state.strip()) < 10:
+                            # Si no hay estado claro, hacer click aleatorio suave para testing
+                            import random
+                            import pyautogui
+                            screen_width, screen_height = pyautogui.size()
+                            x = random.randint(screen_width//4, 3*screen_width//4)
+                            y = random.randint(screen_height//4, 3*screen_height//4)
+                            pyautogui.click(x, y)
+                            self.wlog(f"🖱 Click aleatorio en ({x}, {y}) - esperando análisis...")
+                        
+                        time.sleep(1.5)  # Menos frecuente para reducir CPU
+                    except Exception as e:
+                        self.wlog(f"❌ Error en bucle de juego: {e}")
+                        time.sleep(2)
+            
+            self._game_ia_running = True
+            threading.Thread(target=game_loop, daemon=True).start()
+        except Exception as e:
+            self.log(f"❌ Error: {e}")
+
+    def _stop_game_ia(self):
+        """Detener IA"""
+        try:
+            self._game_ia_running = False
+            self.game_status_lbl.configure(text="⏸ Detenido", col=RED_T)
+            self.log("⏹ Game IA detenido")
+        except Exception as e:
+            self.log(f"❌ Error: {e}")
 
     def _tab_creditos(self, parent):
         tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
@@ -1089,7 +1315,7 @@ class App(ctk.CTk):
         lb(feat_frame, "✨ Características", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
         features = [
             "🤖 Chat IA con Cerebras/Groq",
-            "🔊 Voces Edge TTS y Fish Audio",
+            "🔊 Voces Edge TTS neurales",
             "🎛 Equalizador de voz (graves, agudos, velocidad, auto-tune)",
             "😀 Detección de emociones",
             "🌍 Traductor en tiempo real",
@@ -1191,7 +1417,6 @@ END OF TERMS AND CONDITIONS"""
         lb(third_party_frame, "  CustomTkinter - MIT", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
         lb(third_party_frame, "  TwitchIO - MIT", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
         lb(third_party_frame, "  Groq/Cerebras API - Proprietary", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        lb(third_party_frame, "  Fish Audio - Proprietary", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
         
         return tab
 
@@ -1203,15 +1428,7 @@ END OF TERMS AND CONDITIONS"""
         self.log_box.see("end")
 
     def wlog(self, text):
-        self.log_box.insert("end", text + "\n")
-        self.log_box.see("end")
-        self.watcher_log.insert("end", text + "\n")
-        self.watcher_log.see("end")
-
-    def _sync_wlbl(self, v):
-        t = f"{int(v)}s"
-        self._wlbl.configure(text=t)
-        self._wlbl2.configure(text=t)
+        self.log(text)
 
     def get_devices(self):
         sn = self.sp2.get()
@@ -1399,34 +1616,36 @@ END OF TERMS AND CONDITIONS"""
         threading.Thread(target=run, daemon=True).start()
 
     # ── Comentarista ─────────────────────────────────────────────────────────
-    def toggle_watcher(self):
-        if self.game_watcher and self.game_watcher.activo:
-            self.game_watcher.detener()
-            self.game_watcher = None
-            for b in [self.btn_watcher, self.btn_watcher2]:
-                b.configure(text="▶  Iniciar comentarista", fg_color=GRN, text_color=GRN_T)
-            self.watcher_status.configure(text="⭕  INACTIVO", text_color="#f87171")
-        else:
+    def toggle_watcher(self, event=None):
+        if self.comentarista_activo.get() and (not self.game_watcher or not self.game_watcher.activo):
             if not GW_OK:
-                self.wlog("❌  game_watcher.py no disponible — pip install pillow")
+                self.log("❌  game_watcher.py no disponible — pip install pillow")
+                self.comentarista_activo.set(False)
                 return
-            api_key = config.get("GROQ_API_KEY", "")
-            if not api_key:
-                self.wlog("❌  Falta GROQ_API_KEY en config.txt")
+            groq_key = config.get("GROQ_API_KEY", "")
+            google_key = config.get("GOOGLE_API_KEY", "")
+            if not groq_key and not google_key:
+                self.log("❌  Falta GROQ_API_KEY o GOOGLE_API_KEY")
+                self.comentarista_activo.set(False)
                 return
-            iv = int(self.watcher_intervalo.get())
+            leer_chat = self.comentarista_leer_chat.get()
             self.game_watcher = GameWatcher(
-                api_key=api_key,
+                api_key=groq_key,
+                google_api_key=google_key,
                 speak_fn=speak, stop_audio_fn=stop_audio,
                 get_devices_fn=self.get_devices,
                 current_prompt_fn=lambda: self.current_prompt,
-                intervalo=iv, voice="es-MX-DaliaNeural",
-                log_fn=self.wlog)
+                intervalo=30, voice="es-MX-DaliaNeural",
+                log_fn=self.log, modo_solo_ver=False,
+                get_twitch_messages_fn=get_twitch_messages,
+                leer_chat=leer_chat)
             self.game_watcher.iniciar()
-            for b in [self.btn_watcher, self.btn_watcher2]:
-                b.configure(text="⏹  Detener comentarista", fg_color=RED, text_color=RED_T)
-            self.watcher_status.configure(
-                text=f"🟢  ACTIVO — cada {iv}s", text_color="#4ade80")
+            chat_str = " + CHAT" if leer_chat else ""
+            self.log(f"🎮 Comentarista INICIADO{chat_str}")
+        elif not self.comentarista_activo.get() and self.game_watcher and self.game_watcher.activo:
+            self.game_watcher.detener()
+            self.game_watcher = None
+            self.log("🎮 Comentarista DETENIDO")
 
     # ── Traductor ─────────────────────────────────────────────────────────────
     def _get_translator(self):
@@ -1465,8 +1684,17 @@ END OF TERMS AND CONDITIONS"""
                 cfg["IA_DEVICE"] = str(self.dev_names.index(idx) if idx in self.dev_names else 0)
             except:
                 cfg["IA_DEVICE"] = "0"
+        
+        # Guardar tecla PTT
+        if hasattr(self, 'ptt_key_entry'):
+            ptt_key = self.ptt_key_entry.get().strip().upper()
+            if not ptt_key:
+                ptt_key = "F9"
+            cfg["PTT_KEY"] = ptt_key
+            config["PTT_KEY"] = ptt_key
+        
         save_config(cfg)
-        self.log("Configuracion guardada correctamente")
+        self.log(f"Configuracion guardada ({ptt_key if hasattr(self, 'ptt_key_entry') else 'F9'})")
 
     def _borrar_memoria(self):
         try:
