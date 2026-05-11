@@ -15,7 +15,7 @@ def load_memory():
                 json.dump({}, f)
             return {}
         except Exception as e:
-            print("❌ Error creando memoria:", e)
+            print("[ERROR] Error creando memoria:", e)
             return {}
 
     try:
@@ -35,7 +35,7 @@ def save_memory(memory):
         os.replace(tmp_file, MEMORY_FILE)
 
     except Exception as e:
-        print("❌ Error guardando memoria:", e)
+        print("[ERROR] Error guardando memoria:", e)
 
 
 # 🧠 detectar info importante
@@ -56,32 +56,64 @@ def is_important(text):
     return any(c in text for c in claves)
 
 
-# 💖 memoria emocional
+# emocion: 0=neutral, 1=happy, 2=excited, 3=angry, 4=sad, 5=sick, 6=bored
 def update_mood(memory, user, text):
     if user not in memory:
         return
 
-    positivos = ["gracias", "te quiero", "genial", "buena", "amo", "like"]
-    negativos = ["odio", "tonto", "malo", "callate", "fea"]
+    positivos = ["gracias", "te quiero", "genial", "buena", "amo", "like", "jaja", "lol", "xD", "😄", "❤️", "best", "awesome", "good"]
+    negativos = ["odio", "tonto", "malo", "callate", "fea", "triste", "sad", "wtf", "que mal", "gay"]
+    excitados = ["wow", "increible", "no puedo creer", "holy", "guau", "madre mia", "awesome", "epic", "fail"]
+    aburridos = ["aburrido", "que flojo", "nada", "meh", "pofa", "please", "lazy"]
+    enferizos = ["enfermo", "malito", "dolor", "hurt", "sick", "me duele", "ugh", "tos"]
 
-    score = 0
     t = text.lower()
+    emot = memory[user].get("emotion", 0)
 
     for p in positivos:
         if p in t:
-            score += 1
-
+            emot = 1
     for n in negativos:
         if n in t:
-            score -= 1
+            emot = 3
+    for e in excitados:
+        if e in t:
+            emot = 2
+    for a in aburridos:
+        if a in t:
+            emot = 6
+    for f in enferizos:
+        if f in t:
+            emot = 5
 
     if "mood" not in memory[user]:
         memory[user]["mood"] = 0
 
-    memory[user]["mood"] += score
+    memory[user]["mood"] += 1 if any(p in t for p in positivos) else -1 if any(n in t for n in negativos) else 0
 
-    # limitar
     memory[user]["mood"] = max(-5, min(5, memory[user]["mood"]))
+    memory[user]["emotion"] = emot
+
+
+EMOTION_VOICES = {
+    0: "es-MX-DaliaNeural",      # neutral
+    1: "es-MX-DaliaNeural",     # happy - use same voice but slower
+    2: "es-MX-LorenaNeural",    # excited - higher pitch
+    3: "es-ES-ElviraNeural",    # angry
+    4: "es-MX-DaliaNeural",     # sad - slower
+    5: "es-AR-TomasNeural",    # sick
+    6: "es-ES-ElviraNeural",     # bored
+}
+
+EMOTION_PREFIXES = {
+    0: ["Oye", "Mira", "Escucha"],
+    1: ["¡Oye!", "~ ¡Qué bueno verte!", "¡Hola!"],
+    2: ["¡Wow!", "¡Mira!", "¡Oye!"],
+    3: ["...?", "...", "Disculpa?"],
+    4: ["... ", "Uh... ", "Mm... "],
+    5: ["... ", "Ugh... ", "Mm... "],
+    6: ["... ", "Ok... ", "Si... "],
+}
 
 
 def add_message(memory, user, text):
@@ -89,7 +121,8 @@ def add_message(memory, user, text):
         memory[user] = {
             "history": [],
             "data": [],
-            "mood": 0
+            "mood": 0,
+            "emotion": 0
         }
 
     memory[user]["history"].append(text)
@@ -143,4 +176,4 @@ def clear_memory():
         with open(MEMORY_FILE, "w", encoding="utf-8") as f:
             json.dump({}, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print("❌ Error borrando memoria:", e)
+        print("[ERROR] Error borrando memoria:", e)
