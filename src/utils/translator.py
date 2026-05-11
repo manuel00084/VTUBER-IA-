@@ -34,11 +34,11 @@ import tkinter.font as tkfont
 import requests
 
 try:
-    from PIL import ImageGrab, Image
+    from PIL import Image
     PIL_OK = True
 except ImportError:
     PIL_OK = False
-    print("⚠  Instala pillow: pip install pillow")
+    print("WARNING: Instala pillow: pip install pillow")
 
 # ── Intentar leer config.txt si existe (para modo standalone) ────────────────
 def _leer_config():
@@ -60,8 +60,8 @@ def _leer_config():
 
 # ── Modelos de visión Groq (rota automáticamente) ────────────────────────────
 MODELOS_VISION = [
-    "llava-v1.5-7b-4096-preview",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "llama-3.2-90b-vision-preview",
+    "llama-3.2-11b-vision-preview",
 ]
 
 # ── Modos de traducción ───────────────────────────────────────────────────────
@@ -125,17 +125,161 @@ C_LOGBG  = "#0f1117"
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  GROQ VISION OCR + TRADUCCIÓN
+#  OCR + TRADUCCIÓN (EasyOCR offline + Google Translate API)
 # ════════════════════════════════════════════════════════════════════════════
+def _ocr_easyocr(img):
+    """OCR usando EasyOCR - reconocimiento offline de texto"""
+    try:
+        from src.utils.windows_ocr import reconocer_texto_con_posicion
+        return reconocer_texto_con_posicion(img)
+    except Exception as e:
+        print(f"OCR error: {str(e)[:50]}")
+        return []
+
+
+def _traducir_texto_api(texto, idioma_origen, idioma_destino, motor="Google"):
+    """Traduce texto usando APIs de traducción"""
+    if not texto:
+        return "", None
+    
+    try:
+        # Manejar nombres viejos y nuevos de motores
+        if motor in ["Google", "Google (gratis)", "Groq (OCR)"]:
+            return _traducir_google_api(texto, idioma_origen, idioma_destino)
+        elif motor == "MyMemory" or motor == "MyMemory (gratis)":
+            return _traducir_mymemory_texto(texto, idioma_origen, idioma_destino)
+        elif motor == "DeepL":
+            return _traducir_deepl_texto(texto, idioma_destino)
+        else:
+            return _traducir_google_api(texto, idioma_origen, idioma_destino)
+    except Exception as e:
+        print(f"Traducción error: {e}")
+        return "", None
+
+
+def _detectar_idioma(texto):
+    """Detecta el idioma del texto basado en rangos Unicode"""
+    if not texto:
+        return "auto"
+    
+    hiragana = 0
+    katakana = 0
+    hangul = 0
+    cjk = 0
+    ascii_letras = 0
+    total = len(texto)
+    
+    for c in texto:
+        code = ord(c)
+        if 0x3040 <= code <= 0x309F:
+            hiragana += 1
+        elif 0x30A0 <= code <= 0x30FF:
+            katakana += 1
+        elif 0xAC00 <= code <= 0xD7AF:
+            hangul += 1
+        elif 0x4E00 <= code <= 0x9FFF:
+            cjk += 1
+        elif 0x0041 <= code <= 0x007A:
+            ascii_letras += 1
+    
+    if hangul > total * 0.1:
+        return "ko"
+    if hiragana > 0 or katakana > 0:
+        return "ja"
+    if cjk > total * 0.3 and ascii_letras < cjk:
+        return "zh-CN"
+    if ascii_letras > total * 0.5:
+        return "en"
+    return "auto"
+
+
+def _traducir_google_api(texto, origen, destino):
+    """Traduce usando Google Translate API con detección automática de idioma"""
+    try:
+        idioma_map = {
+            "español": "es", "inglés": "en", "portugués": "pt", 
+            "francés": "fr", "alemán": "de", "japonés": "ja",
+            "coreano": "ko", "chino": "zh-CN"
+        }
+        target = idioma_map.get(destino, "es")
+        
+        # Intentar con auto-detección primero
+        source = _detectar_idioma(texto) if origen == "auto" else origen
+        
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": source,
+            "tl": target,
+            "dt": "t",
+            "q": texto
+        }
+        r = requests.get(url, params=params, timeout=10)
+        
+        traduccion = ""
+        if r.status_code == 200:
+            result = r.json()
+            if result and result[0]:
+                traduccion = "".join([x[0] for x in result[0] if x[0]])
+        
+        # Si no tradujo (mismo texto) y detectamos mal, reintentar con auto
+        if not traduccion or traduccion == texto[:len(traduccion)]:
+            if source != "auto":
+                params["sl"] = "auto"
+                r2 = requests.get(url, params=params, timeout=10)
+                if r2.status_code == 200:
+                    result2 = r2.json()
+                    if result2 and result2[0]:
+                        traduccion2 = "".join([x[0] for x in result2[0] if x[0]])
+                        if traduccion2 and traduccion2 != texto[:len(traduccion2)]:
+                            traduccion = traduccion2
+        
+        return traduccion or "", origen
+    except Exception as e:
+        print(f"Google API error: {e}")
+        return "", None
+
+
+def _traducir_deepl_texto(texto, destino):
+    """Traduce usando DeepL API"""
+    try:
+        # DeepL necesita API key, usar versión gratuita limitada
+        return "", None
+    except:
+        return "", None
+
+
+def _traducir_mymemory_texto(texto, origen, destino):
+    """Traduce usando MyMemory API (gratuito, 1000 palabras/día)"""
+    try:
+        idioma_map = {
+            "español": "es", "inglés": "en", "portugués": "pt",
+            "francés": "fr", "alemán": "de", "japonés": "ja",
+            "coreano": "ko", "chino": "zh"
+        }
+        target = idioma_map.get(destino, "es")
+        
+        url = "https://api.mymemory.translated.net/get"
+        params = {"q": texto, "langpair": f"auto|{target}"}
+        r = requests.get(url, params=params, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            result = data.get("responseData", {}).get("translatedText", "")
+            return result, None
+        return "", None
+    except Exception as e:
+        print(f"MyMemory error: {e}")
+        return "", None
+
+
 def _img_a_b64(img) -> str:
-    """Convierte imagen PIL a base64 JPEG optimizado."""
+    """Convierte imagen PIL a base64 (para cuando se use Groq como fallback)"""
     w, h = img.size
-    # Redimensionar si es muy grande (ahorra tokens)
-    if w > 1280:
-        ratio = 1280 / w
-        img = img.resize((1280, int(h * ratio)), Image.LANCZOS)
+    if w > 960:
+        ratio = 960 / w
+        img = img.resize((960, int(h * ratio)), Image.LANCZOS)
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=75)
+    img.save(buf, format="JPEG", quality=65)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
@@ -198,13 +342,13 @@ def _llamar_groq(img_b64: str, api_key: str, sistema: str, modelo: str) -> dict 
                 {"type": "text", "text": "Detecta y traduce todo el texto de la imagen."}
             ]}
         ],
-        "max_tokens": 700,
-        "temperature": 0.05,
+        "max_tokens": 500,  # Reducido para velocidad
+        "temperature": 0.01,  # Más bajo para consistencia y velocidad
     }
     try:
         r = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
-            json=data, headers=headers, timeout=30
+            json=data, headers=headers, timeout=15  # Timeout reducido
         )
         if r.status_code == 429:
             return {"__rate_limit": True}
@@ -442,7 +586,7 @@ class BubbleOverlay:
         self.win.title("__overlay__")
         self.win.attributes("-topmost", True)
         self.win.attributes("-fullscreen", True)
-        self.win.attributes("-alpha", 0.0)   # invisible hasta dibujar
+        self.win.attributes("-alpha", 0.0)
         self.win.overrideredirect(True)
         self.win.configure(bg="black")
 
@@ -450,20 +594,22 @@ class BubbleOverlay:
                                 highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
 
-        # Click-through en Windows
+        self.win.withdraw()
+
+    def _hacer_click_through(self):
+        """Aplica estilo click-through a la ventana overlay"""
         try:
             import ctypes
             hwnd = self.win.winfo_id()
             GWL_EXSTYLE = -20
-            WS_EX_LAYERED   = 0x80000
+            WS_EX_LAYERED = 0x80000
             WS_EX_TRANSPARENT = 0x20
+            WS_EX_TOOLWINDOW = 0x80
             style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            ctypes.windll.user32.SetWindowLongW(
-                hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED | WS_EX_TRANSPARENT)
+            nuevo_style = style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, nuevo_style)
         except Exception:
             pass
-
-        self.win.withdraw()
 
     def dibujar(self, bloques: list, bbox=None):
         """
@@ -564,6 +710,7 @@ class BubbleOverlay:
             self.win.deiconify()
             self.win.attributes("-topmost", True)
             self.win.attributes("-alpha", 0.93)
+            self._hacer_click_through()  # Reaplicar click-through cada vez
             self._visible = True
 
     def limpiar(self):
@@ -775,7 +922,7 @@ class TranslatorManager:
                  voice: str = "es-MX-DaliaNeural",
                  idioma_destino: str = "español",
                  log_fn=None, leer_en_voz: bool = True,
-                 modo: str = MODO_DEFAULT, motor: str = "Groq (OCR)"):
+                 modo: str = MODO_DEFAULT, motor: str = "Google (gratis)"):
 
         self.api_key        = api_key
         self.speak          = speak_fn
@@ -880,7 +1027,7 @@ class TranslatorManager:
         def on_area(coords):
             self.area_fija = coords
             self.log(f"📐  Área continua: {coords}")
-            self.iniciar_continuo(con_overlay=False)
+            self.iniciar_continuo(con_overlay=True)
         AreaSelector(on_area).seleccionar()
 
     def traducir_pantalla_unica(self):
@@ -893,7 +1040,7 @@ class TranslatorManager:
         self.area_fija = None
         self.iniciar_continuo(con_overlay=True)
 
-    def iniciar_continuo(self, con_overlay: bool = False):
+    def iniciar_continuo(self, con_overlay: bool = True):
         if self.activo:
             self.log("⚠  Ya hay traducción continua activa"); return
         self.activo  = True
@@ -917,35 +1064,81 @@ class TranslatorManager:
 
     def _traducir_una_vez(self, bbox=None, con_overlay: bool = True):
         if not PIL_OK:
-            self.log("❌  Falta pillow — pip install pillow"); return
-        if not self.api_key or not self.api_key.strip():
-            self.log("❌  Falta GROQ_API_KEY"); return
+            self.log("[WARNING] Falta pillow - pip install pillow"); return
         try:
-            # Ocultar el panel flotante durante la captura para no OCRearlo
-            self.panel.ocultar()
-            time.sleep(0.1)
+            # Usar PIL ImageGrab (mas confiable que GDI para OCR)
+            from src.utils.windows_ocr import capturar_pantalla
             
-            region = bbox or self.area_fija
-            self.log("📸  Capturando...")
-            img = ImageGrab.grab(bbox=region)
+            if bbox:
+                img = capturar_pantalla(bbox)
+            else:
+                img = capturar_pantalla()
             
-            # Restaurar panel
-            self.panel.mostrar()
-            
-            self.log(f"🧠  OCR+traducción [{self.motor}]...")
-            resultado, nuevo_idx = traducir_imagen(
-                img, self.api_key, self.modo,
-                self.idioma_destino, self._modelo_idx, self.log, self.motor)
-            self._modelo_idx = nuevo_idx
-
-            if not resultado:
+            if img is None:
+                self.log("[WARNING] No se pudo capturar la pantalla")
                 return
-
-            self._procesar(resultado, bbox or region, con_overlay)
-
+            
+            print("[DEBUG TRAD] Paso 1: OCR...")
+            bloques_raw = _ocr_easyocr(img)
+            print(f"[DEBUG TRAD] Paso 2: OCR retorno {len(bloques_raw)} bloques")
+            
+            if not bloques_raw:
+                print("[DEBUG TRAD] No hay bloques, saliendo")
+                self.log("[WARNING] No se detecto texto")
+                return
+            
+            print(f"[DEBUG TRAD] Paso 3: Traduciendo {min(len(bloques_raw), 20)} bloques...")
+            texto_completo = ""
+            bloques_traducidos = []
+            
+            for i, bloque in enumerate(bloques_raw[:20]):
+                original = bloque.get('original', '')
+                if not original:
+                    continue
+                
+                print(f"[DEBUG TRAD] Bloque {i}: \"{original[:20]}\" -> ", end="")
+                
+                traduccion, _ = _traducir_texto_api(
+                    original, "auto", self.idioma_destino, self.motor
+                )
+                
+                if traduccion and traduccion != original:
+                    print(f"\"{traduccion[:20]}\" [OK]")
+                    bloque['traduccion'] = traduccion
+                    bloques_traducidos.append(bloque)
+                    texto_completo += original + " "
+                else:
+                    print("[SALTADO]")
+            
+            print(f"[DEBUG TRAD] Paso 4: {len(bloques_traducidos)} bloques traducidos")
+            
+            if not bloques_traducidos:
+                print("[DEBUG TRAD] No se tradujo ningun bloque")
+                self.log("[WARNING] No se pudo traducir ningun texto")
+                return
+            
+            texto_completo = texto_completo.strip()
+            traduccion_completa = " ".join([b['traduccion'] for b in bloques_traducidos])
+            
+            print(f"[DEBUG TRAD] Traduccion completa: {traduccion_completa[:50]}...")
+            
+            resultado = {
+                "idioma_detectado": "auto",
+                "es_idioma_destino": False,
+                "texto_completo": texto_completo,
+                "traduccion_completa": traduccion_completa,
+                "bloques": bloques_traducidos
+            }
+            
+            region = bbox or self.area_fija or (0, 0, 1920, 1080)
+            self._procesar(resultado, region, con_overlay)
+            print("[DEBUG TRAD] Procesado completado")
+        
         except Exception as e:
-            self.log(f"❌  Error: {e}")
-            self.log(traceback.format_exc())
+            print(f"[DEBUG TRAD] ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            self.log(f"[ERROR] Error: {e}")
 
     def _procesar(self, resultado: dict, bbox, con_overlay: bool):
         original   = resultado.get("texto_completo", "").strip()
@@ -953,41 +1146,28 @@ class TranslatorManager:
         bloques    = resultado.get("bloques", [])
         es_destino = resultado.get("es_idioma_destino", False)
         idioma     = resultado.get("idioma_detectado", "?")
+        
+        print(f"[DEBUG PROC] original='{original[:30]}' traduccion='{traduccion[:30]}' bloques={len(bloques)}")
 
         if not original:
-            self.log("⏭  Sin texto detectado")
+            print("[DEBUG PROC] Sin texto original")
+            self.log("[INFO] Sin texto detectado")
             return
         if traduccion == self._ultimo_texto:
-            self.log("⏭  Texto sin cambios")
+            print("[DEBUG PROC] Texto sin cambios, saltando")
+            self.log("[INFO] Texto sin cambios")
             return
         self._ultimo_texto = traduccion
 
-        # Log
-        if es_destino:
-            self.log(f"🔊  [{idioma}] Texto en {self.idioma_destino} — leyendo como narrador")
-        else:
-            preview = traduccion[:70] + ("..." if len(traduccion) > 70 else "")
-            self.log(f"🌐  [{idioma}→{self.idioma_destino}] {preview}")
-
-        # Panel flotante
+        print(f"[DEBUG PROC] Mostrando traduccion en panel...")
         self.panel.set_texto(original, traduccion, es_destino)
         self.panel.mostrar()
 
-        # Overlay de burbujas
         if con_overlay and bloques:
+            print(f"[DEBUG PROC] Dibujando overlay con {len(bloques)} bloques...")
             self.overlay.dibujar(bloques, bbox)
-        elif not con_overlay:
-            self.overlay.limpiar()
-
-        # TTS continuo sin interrumpir
-        if self.leer_en_voz:
-            texto_voz = original if es_destino else traduccion
-            if texto_voz.strip() and self.speak:
-                try:
-                    _, ia_dev = self.get_devices() if self.get_devices else (0, 0)
-                    self.speak(texto_voz, self.voice, ia_dev)
-                except Exception as e:
-                    self.log(f"⚠  Voz error: {e}")
+        
+        print("[DEBUG PROC] Procesado completado")
 
     def cerrar(self):
         self.detener_continuo()
@@ -1032,9 +1212,9 @@ def _standalone():
         from src.audio import speak as _spk, stop_audio as _stop
         speak_fn = _spk
         stop_fn  = _stop
-        print("✅  TTS cargado desde src.audio")
+        print("[OK] TTS cargado desde src.audio")
     except Exception:
-        print("⚠  TTS no disponible en modo standalone")
+        print("WARNING: TTS no disponible en modo standalone")
 
     translator = TranslatorManager(
         master         = None,
