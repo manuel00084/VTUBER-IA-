@@ -2,16 +2,42 @@ import sounddevice as sd
 import queue
 import sys
 import json
-import vosk
 import os
 
+VOSK_OK = False
+vosk = None
+_model = None
+
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "vosk-model-small-es-0.42")
+
+def _try_load_vosk():
+    global VOSK_OK, vosk
+    try:
+        import vosk as v
+        vosk = v
+        VOSK_OK = True
+        return True
+    except Exception as e:
+        print(f"Vosk not available: {e}")
+        return False
+
+def _ensure_vosk():
+    global vosk, _model
+    if not VOSK_OK:
+        _try_load_vosk()
+    if VOSK_OK and _model is None and os.path.exists(MODEL_PATH):
+        try:
+            _model = vosk.Model(MODEL_PATH)
+        except Exception as e:
+            print(f"Vosk model error: {e}")
+            VOSK_OK = False
 
 q = queue.Queue()
 stream = None
 recognizer = None
-_model = None
+_stream_active = False
 
+_try_load_vosk()
 
 def _callback(indata, frames, time, status):
     if status:
@@ -19,64 +45,92 @@ def _callback(indata, frames, time, status):
     q.put(bytes(indata))
 
 
-def _get_model():
-    global _model
-    if _model is None:
-        _model = vosk.Model(MODEL_PATH)
-    return _model
-
-
 def listen():
+    global stream, recognizer, _model
+    _ensure_vosk()
+    if not VOSK_OK:
+        print("STT: Vosk not available")
+        return ""
+    if not os.path.exists(MODEL_PATH):
+        print(f"STT: Model not found at {MODEL_PATH}")
+        return ""
+
     try:
-        rec = vosk.KaldiRecognizer(_get_model(), 16000)
-        with sd.RawInputStream(samplerate=16000, blocksize=8000, dtype='int16',
-                               channels=1, callback=_callback):
-            print("🎤 Escuchando...")
-            while True:
-                data = q.get()
-                if rec.AcceptWaveform(data):
-                    result = json.loads(rec.Result())
-                    return result.get("text", "")
+        if _model is None:
+            if not os.path.exists(MODEL_PATH):
+                print(f"STT: Model path does not exist: {MODEL_PATH}")
+                return ""
+            _model = vosk.Model(MODEL_PATH)
+        recognizer = vosk.KaldiRecognizer(_model, 16000)
+        stream = sd.InputStream(samplerate=16000, channels=1, callback=_callback)
+        with stream:
+            sd.sleep(4000)
+        data = b"".join(list(q.queue))
+        if data:
+            if recognizer.AcceptWaveform(data):
+                result = json.loads(recognizer.Result())
+                return result.get("text", "")
+            else:
+                return ""
+        return ""
     except Exception as e:
-        print("❌ STT error:", e)
-        return None
+        print(f"STT Error: {e}")
+        return ""
+    finally:
+        if stream:
+            stream.close()
+            stream = None
 
 
-def listen_stream_start():
-    global stream, recognizer
-    while not q.empty():
-        try:
-            q.get_nowait()
-        except queue.Empty:
-            break
-    recognizer = vosk.KaldiRecognizer(_get_model(), 16000)
-    stream = sd.RawInputStream(
-        samplerate=16000, blocksize=8000, dtype='int16',
-        channels=1, callback=_callback
-    )
-    stream.start()
+def listen_continuous(callback, device=None):
+    global stream, recognizer, _model
+    _ensure_vosk()
+    if not VOSK_OK:
+        print("Vosk not available")
+        return
+    try:
+        if _model is None:
+            _model = vosk.Model(MODEL_PATH)
+        recognizer = vosk.KaldiRecognizer(_model, 16000)
+        with sd.InputStream(samplerate=16000, channels=1, device=device,
+                           callback=lambda ind, frames, time, status: _callback(ind, frames, time, status)):
+            while True:
+                data = b"".join(list(q.queue))
+                if data:
+                    if recognizer.AcceptWaveform(data):
+                        result = json.loads(recognizer.Result())
+                        callback(result.get("text", ""))
+                sd.sleep(100)
+    except Exception as e:
+        print(f"PTT continuous error: {e}")
+
+
+def listen_stream_start(device=None):
+    global stream, recognizer, _model, _stream_active
+    _ensure_vosk()
+    if not VOSK_OK:
+        print("Vosk not available")
+        return False
+    try:
+        if _model is None:
+            _model = vosk.Model(MODEL_PATH)
+        recognizer = vosk.KaldiRecognizer(_model, 16000)
+        stream = sd.InputStream(samplerate=16000, channels=1, device=device, callback=_callback)
+        stream.start()
+        _stream_active = True
+        return True
+    except Exception as e:
+        print(f"listen_stream_start error: {e}")
+        return False
 
 
 def listen_stream_stop():
-    global stream, recognizer
-    text_parts = []
+    global stream, _stream_active
     try:
-        if stream is not None:
+        if stream:
             stream.stop()
             stream.close()
-        while not q.empty():
-            data = q.get()
-            if recognizer.AcceptWaveform(data):
-                res = json.loads(recognizer.Result())
-                if res.get("text"):
-                    text_parts.append(res["text"])
-        final = json.loads(recognizer.FinalResult())
-        if final.get("text"):
-            text_parts.append(final["text"])
-        return " ".join(text_parts).strip()
+            stream = None
+        _stream_active = False
     except Exception as e:
-        print("❌ STT stream error:", e)
-        return None
-    finally:
-        stream = None
-        recognizer = None
+        print(f"listen_stream_stop error: {e}")

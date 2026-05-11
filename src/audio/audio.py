@@ -10,6 +10,9 @@ import json
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
+from scipy.signal import butter, lfilter
+
+from src.core.config import load_config
 
 audio_queue = queue.Queue()
 
@@ -26,6 +29,77 @@ def detectar_emocion(texto):
     elif any(p in t for p in ["triste", "lo siento", "perdon"]):
         return "triste"
     return "normal"
+
+
+# ===== EQUALIZADOR =====
+def _apply_eq(data, fs, bass_db, treble_db, autotune_amount=0):
+    """
+    Aplicar ecualización de graves, agudos y Auto-Tune.
+    bass_db: -12 a +12 dB
+    treble_db: -12 a +12 dB
+    autotune_amount: 0-100 (intensidad del efecto)
+    """
+    try:
+        from scipy.signal import butter, lfilter
+        
+        nyq = fs / 2
+        
+        # Filtro graves (low shelf) - frecuencia de corte ~200Hz
+        if bass_db != 0:
+            fc_bass = min(200, nyq - 1)
+            # Convertir dB a ganancia lineal
+            gain_bass = 10 ** (bass_db / 20.0)
+            # Filtro paso bajo simple para graves
+            b, a = butter(2, fc_bass / nyq, btype='low')
+            data_low = lfilter(b, a, data)
+            # Mezclar señal original + graves procesados
+            data = data + (data_low - data) * (gain_bass - 1)
+        
+        # Filtro agudos (high shelf) - frecuencia de corte ~2000Hz
+        if treble_db != 0:
+            fc_treble = min(2000, nyq - 1)
+            gain_treble = 10 ** (treble_db / 20.0)
+            # Aplicar filtro paso alto
+            b, a = butter(2, fc_treble / nyq, btype='high')
+            data_high = lfilter(b, a, data)
+            # Mezclar
+            data = data + (data_high - data) * (gain_treble - 1)
+        
+        # Auto-Tune: corrige tono基本的
+        if autotune_amount > 0:
+            data = _apply_autotune(data, fs, autotune_amount)
+        
+        # Normalizar para evitar clipping
+        max_val = np.max(np.abs(data))
+        if max_val > 0.95:
+            data = data * (0.95 / max_val)
+        
+        return data
+    except Exception as e:
+        print("Error applying EQ:", e)
+        return data
+
+
+def _apply_autotune(data, fs, amount):
+    """
+    Auto-Tune simple: suaviza el tono de la voz.
+    amount: 0-100 (intensidad)
+    """
+    try:
+        # Factor de suavizado según amount
+        alpha = amount / 200.0  # 0 a 0.5
+        
+        # Aplicar filtro de suavizado (low-pass simple)
+        result = np.zeros_like(data)
+        result[0] = data[0]
+        
+        for i in range(1, len(data)):
+            result[i] = alpha * result[i-1] + (1 - alpha) * data[i]
+        
+        return result
+    except Exception as e:
+        print("Error Auto-Tune:", e)
+        return data
 
 
 def resample_audio(data, src_rate, dst_rate):
@@ -107,6 +181,15 @@ def audio_worker():
                     rate, pitch = "+10%", "+8Hz"
                 elif emocion == "triste":
                     rate, pitch = "-10%", "-2Hz"
+                
+                # Aplicar EQ manual desde config
+                cfg = load_config()
+                eq_speed = cfg.get("EQ_SPEED", 0)
+                
+                # Ajustar velocidad
+                if eq_speed != 0:
+                    rate = f"{'+' if eq_speed > 0 else ''}{int(eq_speed)}%"
+                
                 communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate, pitch=pitch)
                 await communicate.save(path)
 
@@ -123,7 +206,30 @@ def audio_worker():
 
             try:
                 data, fs = sf.read(path, dtype='float32')
-                _play_multi(data, fs, dev_list)
+                
+                # Obtener IDs de dispositivos
+                cfg = load_config()
+                sp_idx = int(cfg.get("SPEAKER_DEVICE", 0))
+                ia_idx = int(cfg.get("IA_DEVICE", 0))
+                mn_idx = int(cfg.get("MONITOR_DEVICE", 0))
+                
+                # EQ settings
+                eq_bass = cfg.get("EQ_BASS", 0)
+                eq_treble = cfg.get("EQ_TREBLE", 0)
+                eq_autotune = cfg.get("EQ_AUTOTUNE", 0)
+                apply_eq = eq_bass != 0 or eq_treble != 0 or eq_autotune != 0
+                
+                # Reproducir en cada dispositivo por separado
+                for dev in dev_list:
+                    if dev is None or dev == -1:
+                        continue
+                    if dev == mn_idx and apply_eq:
+                        # Solo Monitor recibe EQ
+                        data_dev = _apply_eq(data.copy(), fs, eq_bass, eq_treble, eq_autotune)
+                    else:
+                        # Bot Speaker e IA Voz sin EQ
+                        data_dev = data
+                    _play_on_device(data_dev, fs, dev)
             except Exception as e:
                 print("ERROR playing audio:", e)
 
@@ -143,65 +249,9 @@ def stop_audio():
         pass
 
 
-def speak_fish_audio(text, voice, device=0):
-    """Generate TTS using Fish Audio API"""
-    try:
-        from src.core.config import load_config
-        config_dict = load_config()
-        api_key = config_dict.get("FISH_API_KEY", "")
-        
-        if not api_key:
-            print("ERROR Fish Audio API Key not configured")
-            return False
-            
-        url = "https://api.fish.audio/v1/tts"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "text": text,
-            "model": "suno"
-        }
-        
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
-        
-        if response.status_code != 200:
-            print(f"ERROR Fish Audio API error: {response.status_code} - {response.text}")
-            return False
-        
-        # Save audio to temp file and play it
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
-            f.write(response.content)
-            temp_path = f.name
-            
-            try:
-                data, fs = sf.read(temp_path, dtype='float32')
-                _play_multi(data, fs, [device] if isinstance(device, int) else device)
-            except Exception as e:
-                print(f"ERROR playing Fish Audio: {e}")
-            finally:
-                try:
-                    os.remove(temp_path)
-                except:
-                    pass
-        
-        return True
-        
-    except Exception as e:
-        print(f"ERROR in Fish Audio TTS: {e}")
-        return False
-
-
 def speak(text, voice="es-ES-AlvaroNeural", device=0):
     """device puede ser int (un dispositivo) o lista [dev1, dev2, ...]."""
     try:
-        if voice.startswith("fish_"):
-            success = speak_fish_audio(text, voice, device)
-            if not success:
-                audio_queue.put((text, "es-ES-AlvaroNeural", device))
-        else:
-            audio_queue.put((text, voice, device))
+        audio_queue.put((text, voice, device))
     except Exception as e:
         print("ERROR speak:", e)
