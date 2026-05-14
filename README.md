@@ -365,6 +365,7 @@ VMagicMirror / VTube Studio
         │
         ▼
 OBS Studio / Streaming
+```
 
 ---
 
