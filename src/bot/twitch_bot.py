@@ -13,21 +13,23 @@ from src.ai.memory import (
 
 twitch_messages_buffer = []
 TWITCH_BUFFER_MAX = 50
+chat_ia_activo = False
 
 
 def get_twitch_messages():
     return twitch_messages_buffer.copy()
 
 
-def start_chat(app, token, nick, channel, api_key, speaker_dev, ia_dev, gui_app):
+def is_chat_ia_activo():
+    return chat_ia_activo
+
+
+def start_chat(app, token, nick, channel, api_key, speaker_dev, ia_dev, gui_app,
+               ia_command="!IA", ia_voice="es-MX-DaliaNeural"):
     """
     Inicia el bot de Twitch en un hilo separado.
-
-    Comandos del chat:
-      !sp <texto>   — Bot speaker voz neutra (hombre)
-      !sph <texto>  — Bot speaker voz hombre (igual que !sp)
-      !spm <texto>  — Bot speaker voz mujer
-      !IA <texto>   — Hablar con la VTuber IA
+    ia_command: comando para invocar a la IA (ej: !IA)
+    ia_voice: voz TTS para respuestas de la IA
     """
 
     def run():
@@ -78,14 +80,15 @@ def start_chat(app, token, nick, channel, api_key, speaker_dev, ia_dev, gui_app)
                         if texto:
                             speak(f"{user} dice: {texto}", "es-MX-DaliaNeural", speaker_dev)
 
-                    elif content.lower().startswith("!ia "):
-                        texto = content[4:].strip()
+                    elif content.lower().startswith(f"{ia_command.lower()} "):
+                        cmd_len = len(ia_command) + 1
+                        texto = content[cmd_len:].strip()
                         if not texto:
                             return
                         threading.Thread(
                             target=_procesar_ia,
                             args=(user, texto, mem_data, api_key, gui_app,
-                                  ia_dev, app),
+                                  ia_dev, app, ia_voice),
                             daemon=True
                         ).start()
 
@@ -103,7 +106,9 @@ def start_chat(app, token, nick, channel, api_key, speaker_dev, ia_dev, gui_app)
     threading.Thread(target=run, daemon=True).start()
 
 
-def _procesar_ia(user, texto, mem_data, api_key, gui_app, ia_dev, app):
+def _procesar_ia(user, texto, mem_data, api_key, gui_app, ia_dev, app, ia_voice="es-MX-DaliaNeural"):
+    global chat_ia_activo
+    chat_ia_activo = True
     try:
         app.log(f"💬 {user}: {texto}")
 
@@ -138,8 +143,7 @@ def _procesar_ia(user, texto, mem_data, api_key, gui_app, ia_dev, app):
         mood = mem_data[user].get("mood", 0)
         emotion = mem_data[user].get("emotion", 0)
         
-        # Usar emoción del usuario para elegir voz
-        voz = EMOTION_VOICES.get(emotion, "es-MX-DaliaNeural")
+        voz = EMOTION_VOICES.get(emotion, ia_voice)
         inicio = random.choice(EMOTION_PREFIXES.get(emotion, ["Oye", "Mira", "Escucha"]))
         
         # Agregar flair según emoción
@@ -173,3 +177,5 @@ def _procesar_ia(user, texto, mem_data, api_key, gui_app, ia_dev, app):
         import traceback
         app.log(f"❌ Error procesando IA para {user}: {e}")
         app.log(traceback.format_exc())
+    finally:
+        chat_ia_activo = False
