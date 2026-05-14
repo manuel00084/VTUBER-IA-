@@ -15,15 +15,21 @@ CEREBRAS_MODELOS = [
 
 GROQ_TEXT_MODELOS = [
     "llama-3.1-8b-instant",
-    "llama3-8b-8192",
-    "gemma2-9b-it",
+    "llama-3.3-70b-versatile",
+]
+
+GROQ_VISION_MODELOS = [
+    "llama-3.2-11b-vision-preview",
+    "llama-3.2-90b-vision-preview",
+    "llava-v1.5-7b-4096-preview",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
 ]
 
 
 def ask_ai(text, api_key, prompt, provider="groq", max_caracteres=500, reintentos=3, vision=False):
     """
     Envía un mensaje a Groq o Cerebras y devuelve la respuesta.
-    provider: 'groq' para traduccion/vision, 'cerebras' para chat bot
+    provider: 'groq' o 'cerebras'
     vision: True para enviar imagen (Groq only)
     """
     if not api_key or api_key.strip() == "":
@@ -127,10 +133,6 @@ def ask_groq(text, api_key, prompt, max_caracteres=500, reintentos=3):
 def ask_cerebras(text, api_key, prompt, max_caracteres=500, reintentos=3):
     return ask_ai(text, api_key, prompt, provider="cerebras", max_caracteres=max_caracteres, reintentos=reintentos)
 
-GROQ_VISION_MODELOS = [
-    "llava-v1.5-7b-4096-preview",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-]
 
 def ask_vision(image_b64, texto, api_key, prompt, modelo_idx=0, log=print):
     """Traduce/detecta texto en imagen usando Groq Vision."""
