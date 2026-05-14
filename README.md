@@ -408,7 +408,8 @@ GitHub:
 
 [https://github.com/manuel00084](https://github.com/manuel00084)
 
-Twitch
+Twitch:
+
 [https://www.twitch.tv/manuel0084)](https://www.twitch.tv/manuel0084)
 
 ---
