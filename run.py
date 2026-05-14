@@ -3,14 +3,28 @@ Karin VTuber - Launcher
 """
 import os
 import sys
+import glob
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
+if hasattr(sys, '_MEIPASS'):
+    APP_DIR = sys._MEIPASS
+    
 os.chdir(APP_DIR)
 sys.path.insert(0, APP_DIR)
 
 print("Starting Karin VTuber...")
 print(f"Current directory: {os.getcwd()}")
 print(f"APP_DIR: {APP_DIR}")
+
+# Buscar vosk en el directorio temporal o en el path
+vosk_paths = [
+    os.path.join(APP_DIR, 'vosk'),
+    os.path.join(os.getcwd(), 'vosk'),
+]
+for vp in vosk_paths:
+    if os.path.exists(vp):
+        sys.path.insert(0, os.path.dirname(vp))
+        break
 
 try:
     print("Importing App from src.ui.main...")
