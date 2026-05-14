@@ -1,5 +1,10 @@
 import customtkinter as ctk
 import threading, os, traceback, webbrowser, requests, base64, time, json
+try:
+    import keyboard
+    KEYBOARD_OK = True
+except ImportError:
+    KEYBOARD_OK = False
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -10,292 +15,59 @@ APP_NAME = "Karin VTuber -IA-"
 from src.core.config import load_config
 from src.audio import audio_worker, speak, stop_audio, get_output_devices
 from src.ai import ask_groq, ask_cerebras, ask_ai
-from src.bot.twitch_bot import start_chat, get_twitch_messages
-from src.core.oauth_server import TwitchOAuth, validate_token
+from src.bot.twitch_bot import start_chat, get_twitch_messages, is_chat_ia_activo
+from src.core.oauth_server import TwitchOAuth, validate_token, fetch_twitch_game
 from src.utils.ptt import PTTManager
 from src.utils.game_watcher import GameWatcher
+
 from src.utils import PIL_OK
-from src.utils.translator import TranslatorManager
 from PIL import Image
 
 config = load_config()
 
-# ===== SERVICIO DE VISIÓN CENTRALIZADO (PaddleOCR) =====
-class VisionService:
-    def __init__(self):
-        self.running = False
-        self.last_image = None
-        self.last_analysis = {
-            "text": "",
-            "description": "",
-            "game_state": "",
-            "objects": [],
-            "timestamp": 0
-        }
-        self.analysis_interval = 3.0  # segundos entre análisis
-        self.last_analysis_time = 0
-    
-    def start(self):
-        self.running = True
-        threading.Thread(target=self._vision_loop, daemon=True).start()
-    
-    def stop(self):
-        self.running = False
-    
-    def _vision_loop(self):
-        while self.running:
-            try:
-                current_time = time.time()
-                if current_time - self.last_analysis_time >= self.analysis_interval:
-                    self._analyze_screen()
-                    self.last_analysis_time = current_time
-                time.sleep(0.1)
-            except Exception as e:
-                print(f"Vision service error: {e}")
-                time.sleep(1)
-    
-    def _analyze_screen(self):
-        """Análisis de pantalla usando PaddleOCR (gratis, offline)"""
-        try:
-            # Usar Windows Graphics Capture API + PaddleOCR
-            from src.utils.win_capture import capturar_pantalla
-            from src.utils.windows_ocr import reconocer_texto_con_posicion
-            
-            screenshot = capturar_pantalla()
-            
-            if screenshot is None:
-                self.last_analysis = {"text": "Error capturando pantalla", "description": "", "game_state": "", "objects": [], "timestamp": time.time()}
-                return
-            
-            # OCR con PaddleOCR
-            bloques = reconocer_texto_con_posicion(screenshot)
-            
-            if bloques:
-                texto = " ".join([b['original'] for b in bloques])
-                self.last_analysis = {
-                    "text": texto,
-                    "description": f"Se detectaron {len(bloques)} elementos de texto",
-                    "game_state": "",
-                    "objects": [b['original'][:30] for b in bloques[:10]],  # primeros 10 textos
-                    "timestamp": time.time()
-                }
-            else:
-                self.last_analysis = {"text": "", "description": "No se detectó texto", "game_state": "", "objects": [], "timestamp": time.time()}
-                
-        except ImportError as e:
-            self.last_analysis = {"text": f"PaddleOCR no disponible: {e}", "description": "", "game_state": "", "objects": [], "timestamp": time.time()}
-        except Exception as e:
-            self.last_analysis = {"text": f"Error en análisis de visión: {str(e)}", "description": "", "game_state": "", "objects": [], "timestamp": time.time()}
-    
-    def _analyze_with_groq(self, img_base64):
-        """Analizar imagen con Groq Vision"""
-        from src.core.config import load_config
-        cfg = load_config()
-        api_key = cfg.get("GROQ_API_KEY", "")
-        
-        # Prompt para análisis múltiple
-        prompt = """Analiza esta imagen y proporciona:
-1. Texto extraído (OCR) - todo el texto visible
-2. Descripción general de lo que se ve
-3. Estado del juego si es un juego (elementos interactivos, puntuación, etc.)
-4. Lista de objetos/interfaces detectados
+# Paleta moderna — dark mode con acentos purple/pink
+BG     = "#0c0c18"; SIDE   = "#12121e"; CARD  = "#1a1a2e"; CARD2 = "#22223a"
+BORD   = "#a855f7"; PURP   = "#c084fc"
+GRN    = "#059669"; GRN_T  = "#a7f3d0"
+RED    = "#dc2626"; RED_T  = "#fca5a5"
+BLU    = "#2563eb"; BLU_T  = "#93c5fd"
+AMB    = "#d97706"; AMB_T  = "#fcd34d"
 
-Responde en formato JSON:
-{
-  "text": "texto extraído aquí",
-  "description": "descripción general",
-  "game_state": "estado del juego o empty si no es juego",
-  "objects": ["objeto1", "objeto2", ...]
-}"""
-        
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": "llama-3.2-11b-vision-preview",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{img_base64}"
-                            }
-                        }
-                    ]
-                }
-            ],
-            "max_tokens": 1000
-        }
-        
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            content = result["choices"][0]["message"]["content"]
-            
-            # Intentar parsear como JSON
-            try:
-                import json
-                analysis = json.loads(content)
-                self.last_analysis = {
-                    "text": analysis.get("text", ""),
-                    "description": analysis.get("description", ""),
-                    "game_state": analysis.get("game_state", ""),
-                    "objects": analysis.get("objects", []),
-                    "timestamp": time.time()
-                }
-            except:
-                # Si no es JSON, guardar como texto
-                self.last_analysis = {
-                    "text": content,
-                    "description": content[:200] + "..." if len(content) > 200 else content,
-                    "game_state": "",
-                    "objects": [],
-                    "timestamp": time.time()
-                }
-        else:
-            raise Exception(f"Groq API error: {response.status_code}")
-    
-    def _analyze_with_google(self, img_base64):
-        """Analizar imagen con Google Gemini Vision"""
-        from src.core.config import load_config
-        cfg = load_config()
-        api_key = cfg.get("GOOGLE_AI_API_KEY", "")
-        
-        # Prompt para análisis múltiple
-        prompt = """Analyze this image and provide:
-1. Extracted text (OCR) - all visible text
-2. General description of what you see
-3. Game state if it's a game (interactive elements, score, etc.)
-4. List of detected objects/interfaces
+TXT    = "#e2e8f0"; MUT    = "#94a3b8"; LOGBG = "#080812"
 
-Respond in JSON format:
-{
-  "text": "extracted text here",
-  "description": "general description",
-  "game_state": "game state or empty if not a game",
-  "objects": ["object1", "object2", ...]
-}"""
-        
-        # Google Gemini API endpoint
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key={api_key}"
-        
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "contents": [{
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inlineData": {
-                            "mimeType": "image/png",
-                            "data": img_base64
-                        }
-                    }
-                ]
-            }],
-            "generationConfig": {
-                "temperature": 0.2,
-                "topK": 32,
-                "topP": 1,
-                "maxOutputTokens": 1024,
-            }
-        }
-        
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        
-        if response.status_code == 200:
-            result = response.json()
-            # Extract text from Gemini response
-            if "candidates" in result and len(result["candidates"]) > 0:
-                candidate = result["candidates"][0]
-                if "content" in candidate and "parts" in candidate["content"]:
-                    parts = candidate["content"]["parts"]
-                    if len(parts) > 0 and "text" in parts[0]:
-                        content = parts[0]["text"]
-                        
-                        # Intentar parsear como JSON
-                        try:
-                            import json
-                            analysis = json.loads(content)
-                            self.last_analysis = {
-                                "text": analysis.get("text", ""),
-                                "description": analysis.get("description", ""),
-                                "game_state": analysis.get("game_state", ""),
-                                "objects": analysis.get("objects", []),
-                                "timestamp": time.time()
-                            }
-                        except:
-                            # Si no es JSON, guardar como texto
-                            self.last_analysis = {
-                                "text": content,
-                                "description": content[:200] + "..." if len(content) > 200 else content,
-                                "game_state": "",
-                                "objects": [],
-                                "timestamp": time.time()
-                            }
-                    else:
-                        raise Exception("No text content in Gemini response")
-                else:
-                    raise Exception("Invalid Gemini response structure")
-            else:
-                raise Exception("No candidates in Gemini response")
-        else:
-            raise Exception(f"Google Gemini API error: {response.status_code}")
-    
-    def get_analysis(self):
-        return self.last_analysis.copy()
-    
-    def get_text_only(self):
-        return self.last_analysis.get("text", "")
-    
-    def get_description(self):
-        return self.last_analysis.get("description", "")
-    
-    def get_game_state(self):
-        return self.last_analysis.get("game_state", "")
-
-vision_service = VisionService()
-
-# Paleta based on avatar.png - Pink/Purple theme
-BG     = "#1a0a1e"; SIDE   = "#150a20"; CARD  = "#2a1040"; CARD2 = "#3a1550"
-BORD   = "#ff69b4"; PURP   = "#ff69b4"
-GRN    = "#166534"; GRN_T  = "#bbf7d0"
-RED    = "#7f1d1d"; RED_T  = "#fca5a5"
-BLU    = "#1e3a5f"; BLU_T  = "#93c5fd"
-AMB    = "#78350f"; AMB_T  = "#fcd34d"
-
-TXT    = "#fce7f3"; MUT    = "#f9a8d4"; LOGBG = "#0f0518"
-
-def mk(p, **k):
-    k.setdefault("fg_color", CARD); k.setdefault("corner_radius", 10)
-    return ctk.CTkFrame(p, **k)
+def mk(p, accent=False, **k):
+    k.setdefault("fg_color", CARD); k.setdefault("corner_radius", 12)
+    f = ctk.CTkFrame(p, **k)
+    if accent:
+        bar = ctk.CTkFrame(f, fg_color=BORD, height=3, corner_radius=0)
+        bar.pack(fill="x", side="top")
+        bar.pack_propagate(False)
+    return f
 
 def lb(p, t, sz=12, col=TXT, bold=False, **k):
-    return ctk.CTkLabel(p, text=t, font=("Arial", sz, "bold" if bold else "normal"),
+    return ctk.CTkLabel(p, text=t, font=("Segoe UI", sz, "bold" if bold else "normal"),
                         text_color=col, **k)
 
 def cb(p, vals, **k):
     k.setdefault("fg_color", CARD); k.setdefault("border_color", BORD)
-    k.setdefault("button_color", BORD); k.setdefault("dropdown_fg_color", CARD)
-    k.setdefault("font", ("Arial", 11))
+    k.setdefault("button_color", PURP); k.setdefault("dropdown_fg_color", CARD2)
+    k.setdefault("dropdown_hover_color", "#2a2a42")
+    k.setdefault("font", ("Segoe UI", 11))
     return ctk.CTkComboBox(p, values=vals, **k)
 
 def bt(p, t, bg, fg, cmd, h=36, **k):
-    return ctk.CTkButton(p, text=t, fg_color=bg, text_color=fg, hover_color=bg,
-                         font=("Arial", 12, "bold"), corner_radius=8, height=h,
+    import colorsys
+    def _lighten(hex_color, factor=0.15):
+        try:
+            r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
+            h, l, s = colorsys.rgb_to_hls(r/255, g/255, b/255)
+            l = min(1, l + factor * 0.3)
+            r, g, b = colorsys.hls_to_rgb(h, l, s)
+            return f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
+        except:
+            return bg
+    return ctk.CTkButton(p, text=t, fg_color=bg, text_color=fg, hover_color=_lighten(bg),
+                         font=("Segoe UI", 12, "bold"), corner_radius=10, height=h,
                          command=cmd, **k)
 
 
@@ -315,12 +87,12 @@ class App(ctk.CTk):
         print("minsize set")
         self.configure(fg_color=BG)
         print("configure done")
-
+        
         print("Starting audio worker thread...")
         threading.Thread(target=audio_worker, daemon=True).start()
         print("Audio worker thread started")
         print("Audio worker thread started")
-
+        
         # Prompts
         self.prompt_folder = os.path.join(os.path.dirname(__file__), "..", "..", "prompts")
         os.makedirs(self.prompt_folder, exist_ok=True)
@@ -339,10 +111,10 @@ class App(ctk.CTk):
         with open(os.path.join(self.prompt_folder, selected_prompt_file), encoding="utf-8") as f:
             self.current_prompt = f.read()
         self._selected_prompt_file = selected_prompt_file
-
+        
         self.devices   = get_output_devices()
         self.dev_names = [n for n, _ in self.devices] or ["Default"]
-
+        
         # Restaurar dispositivos seleccionados desde config
         sp_idx = int(config.get("SPEAKER_DEVICE", 0))
         ia_idx = int(config.get("IA_DEVICE", 0))
@@ -352,29 +124,28 @@ class App(ctk.CTk):
             self._sp_default = self.dev_names[0] if self.dev_names else "Default"
         if ia_idx < len(self.dev_names):
             self._ia_default = self.dev_names[ia_idx]
+            self._ia_idx = ia_idx
         else:
             self._ia_default = self.dev_names[0] if self.dev_names else "Default"
+            self._ia_idx = 0
         
-        # Restaurar configuración Bot Chat IA
-        self._ia_command = config.get("BOT_IA_COMMAND", "!IA")
-        self._ia_voice = config.get("BOT_IA_VOICE", "es-MX-DaliaNeural")
         self.game_watcher = None
-        self.translator = None
-        
-        # Iniciar servicio de visión
-        vision_service.start()
+        self.lector_subtitulos = None
+        self.player_ia = None
+        self.hotkey_reader = None
+        self._lectura_auto_activa = False
         
         # Todas las voces disponibles
-        self.voices_all = ["es_ES-ElviraNeural", "es_ES-AlvaroNeural",
-                           "es_MX-DaliaNeural", "es_MX-LiaNeural", "es_MX-DarioNeural",
-                           "es_AR-EmiliaNeural", "es_AR-TonoNeural"]
-
+        self.voices_all = ["es-ES-ElviraNeural", "es-ES-AlvaroNeural",
+                           "es-MX-DaliaNeural", "es-MX-LiaNeural", "es-MX-DarioNeural",
+                           "es-AR-EmiliaNeural", "es-AR-TonoNeural"]
+        
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
-
+        
         self._build_sidebar()
         self._build_content()
-
+        
         # PTT
         saved_ptt_key = config.get("PTT_KEY", "F9")
         if PTTManager:
@@ -390,16 +161,19 @@ class App(ctk.CTk):
                 self.log(f"⚠  PTT error: {e}")
         else:
             self.log("⚠  PTT no disponible — pip install keyboard")
-
+        
         if not PIL_OK:
             self.log("Comentarista: pip install pillow")
+        
+
     
     def _build_sidebar(self):
         sb = ctk.CTkFrame(self, fg_color=SIDE, corner_radius=0, width=200)
         sb.grid(row=0, column=0, sticky="nsew")
         sb.grid_propagate(False)
-        sb.grid_rowconfigure(8, weight=1)
-
+        for r in range(10):
+            sb.grid_rowconfigure(r, weight=1 if r == 9 else 0)
+        
         hdr = ctk.CTkFrame(sb, fg_color="transparent")
         hdr.grid(row=0, column=0, sticky="ew", padx=12, pady=(16, 4))
         
@@ -411,150 +185,170 @@ class App(ctk.CTk):
         except Exception as e:
             print(f"Error cargando logo: {e}")
         
-        lb(hdr, "Karin VTuber -IA-", sz=16, bold=True, col="#ff69b4").pack(anchor="center")
-
-        ctk.CTkFrame(sb, height=1, fg_color=BORD).grid(row=1, column=0, sticky="ew", padx=8)
-
-        self._nav_btns = {}
-        buttons = [
-            ("Panel",        "panel"),
-            ("Audio",        "audio"),
-            ("Traductor",    "traductor"),
-            ("Bot Speaker",  "bot_speaker"),
-            ("API_KEY",      "api_key"),
-            ("Creditos",     "creditos"),
-        ]
+        lb(hdr, "Karin VTuber", sz=15, bold=True, col=PURP).pack(anchor="center")
         
+        ctk.CTkFrame(sb, height=1, fg_color=BORD).grid(row=1, column=0, sticky="ew", padx=8)
+        
+        self._nav_btns = {}
+        self._nav_indicators = {}
+        self._nav_container = ctk.CTkFrame(sb, fg_color="transparent")
+        self._nav_container.grid(row=3, column=0, sticky="nsew", padx=6, pady=4)
+        sb.grid_rowconfigure(3, weight=1)
+
+        buttons = [
+            ("📊  Panel",        "panel"),
+            ("🎧  Audio",        "audio"),
+            ("🤖  Bot Speaker",  "bot_speaker"),
+            ("💬  Chat Bot IA", "comentarista"),
+            ("🔑  API Keys",     "api_key"),
+            ("❓  Ayuda",        "creditos"),
+        ]
+
         for i, (txt, key) in enumerate(buttons):
-            b = ctk.CTkButton(sb, text=txt, anchor="w", fg_color="transparent",
-                              text_color=MUT, hover_color=CARD2, font=("Arial", 12),
-                              corner_radius=8, height=34,
+            row = ctk.CTkFrame(self._nav_container, fg_color="transparent", height=36)
+            row.pack(fill="x", pady=1)
+            row.pack_propagate(False)
+            
+            indicator = ctk.CTkFrame(row, fg_color="transparent", width=3, corner_radius=0)
+            indicator.pack(side="left", fill="y")
+            self._nav_indicators[key] = indicator
+            
+            b = ctk.CTkButton(row, text=txt, anchor="w", fg_color="transparent",
+                              text_color=MUT, hover_color=CARD2, font=("Segoe UI", 12),
+                              corner_radius=0, height=36, border_width=0,
                               command=lambda k=key: self._tab(k))
-            b.grid(row=3+i, column=0, sticky="ew", padx=6, pady=1)
+            b.pack(side="left", fill="x", expand=True, padx=(4, 0))
             self._nav_btns[key] = b
-
-        ctk.CTkFrame(sb, height=1, fg_color=BORD).grid(row=9, column=0, sticky="ew", padx=8, pady=6)
-
-        # Botón conectar Twitch (visible)
+        
+        ctk.CTkFrame(sb, height=1, fg_color="#2a2a3e").grid(row=9, column=0, sticky="ew", padx=12, pady=6)
+        
         self.twitch_btn = ctk.CTkButton(
-            sb, text="Conectar Twitch", fg_color=PURP, text_color="#fff",
-            hover_color="#7c58c0", font=("Arial", 11, "bold"), corner_radius=8,
-            height=30, command=self.connect_twitch)
-        self.twitch_btn.grid(row=10, column=0, padx=8, pady=(4, 4), sticky="ew")
-
+            sb, text="🔴  Twitch", fg_color="#9146FF", text_color="#fff",
+            hover_color="#772CE8", font=("Segoe UI", 11, "bold"), corner_radius=10,
+            height=34, command=self.connect_twitch)
+        self.twitch_btn.grid(row=10, column=0, padx=8, pady=(4, 8), sticky="ew")
+    
     def _tab(self, key):
         for k, b in self._nav_btns.items():
-            b.configure(fg_color=CARD2 if k == key else "transparent",
-                        text_color=TXT if k == key else MUT)
+            is_active = (k == key)
+            b.configure(fg_color=CARD2 if is_active else "transparent",
+                        text_color=TXT if is_active else MUT)
+            ind = self._nav_indicators.get(k)
+            if ind:
+                ind.configure(fg_color=BORD if is_active else "transparent")
         for k, f in self._tabs.items():
             if k == key:
                 f.grid(row=0, column=0, sticky="nsew")
             else:
                 f.grid_remove()
-
+    
     # ════════════════════════════════════════════════════════════════════════
     #  CONTENIDO
     # ════════════════════════════════════════════════════════════════════════
     def _build_content(self):
         wrap = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
         wrap.grid(row=0, column=1, sticky="nsew")
+        wrap.grid_rowconfigure(0, weight=0)
         wrap.grid_rowconfigure(1, weight=1)
         wrap.grid_columnconfigure(0, weight=1)
-
+        
         # Topbar
-        top = ctk.CTkFrame(wrap, fg_color=SIDE, corner_radius=0, height=46)
+        top = ctk.CTkFrame(wrap, fg_color=SIDE, corner_radius=0, height=48)
         top.grid(row=0, column=0, sticky="ew")
         top.grid_propagate(False)
         top.grid_columnconfigure(1, weight=1)
-        lb(top, "Panel de control", sz=13, bold=True).grid(row=0, column=0, padx=14, pady=12, sticky="w")
-        tf = ctk.CTkFrame(top, fg_color="transparent")
-        tf.grid(row=0, column=2, padx=8, sticky="e")
-        bt(tf, "⏹ Audio", RED,  RED_T,  stop_audio,    h=28, width=90).pack(side="left", padx=2)
-        bt(tf, "🧪 Voz",  BLU,  BLU_T,  self.test_voice, h=28, width=80).pack(side="left", padx=2)
-        bt(tf, "🤖 IA",   CARD2, TXT,   self.test_ia,    h=28, width=72).pack(side="left", padx=(2, 8))
+        
+        # Accent bottom line
+        ctk.CTkFrame(top, fg_color=BORD, height=2, corner_radius=0).grid(row=1, column=0, columnspan=3, sticky="ew")
+        
+        inner_top = ctk.CTkFrame(top, fg_color="transparent")
+        inner_top.grid(row=0, column=0, sticky="ew", padx=14)
+        inner_top.grid_columnconfigure(1, weight=1)
+        lb(inner_top, "Panel de control", sz=14, bold=True).grid(row=0, column=0, sticky="w")
+        
 
+        
         # Área tabs
         area = ctk.CTkFrame(wrap, fg_color=BG, corner_radius=0)
-        area.grid(row=0, column=0, sticky="nsew")
+        area.grid(row=1, column=0, sticky="nsew")
         area.grid_rowconfigure(0, weight=1)
         area.grid_columnconfigure(0, weight=1)
         
         # Definir todas las voces para usar en el panel
-        self.voices_all = ["es_ES-ElviraNeural", "es_ES-AlvaroNeural",
-                           "es_MX-DaliaNeural", "es_MX-LiaNeural", "es_MX-DarioNeural",
-                           "es_AR-EmiliaNeural", "es_AR-TonoNeural"]
-
+        self.voices_all = ["es-ES-ElviraNeural", "es-ES-AlvaroNeural",
+                           "es-MX-DaliaNeural", "es-MX-LiaNeural", "es-MX-DarioNeural",
+                           "es-AR-EmiliaNeural", "es-AR-TonoNeural"]
+        
         self._tabs = {
             "panel":        self._tab_panel(area),
             "audio":        self._tab_audio(area),
-            "traductor":    self._tab_traductor(area),
             "bot_speaker":  self._tab_bot_speaker(area),
+            "comentarista": self._tab_comentarista(area),
+            "player_ia":    self._tab_player_ia(area),
             "api_key":      self._tab_api_key(area),
             "creditos":     self._tab_creditos(area),
         }
         self._tab("panel")
         self._nav_btns["panel"].configure(fg_color=CARD2, text_color=TXT)
-
+        self._nav_indicators["panel"].configure(fg_color=BORD)
+    
     # ════════════════════════════════════════════════════════════════════════
     #  TAB PANEL
     # ════════════════════════════════════════════════════════════════════════
     def _tab_panel(self, parent):
         tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
-
-        # Log
-        lc = mk(tab)
+        
+        # Log con acento
+        lc = mk(tab, accent=True)
         lc.pack(fill="x", padx=14, pady=(12, 6))
-        lb(lc, "📋  Actividad", sz=11, bold=True).pack(anchor="w", padx=10, pady=(8, 2))
+        lb(lc, "📋  Actividad", sz=11, bold=True).pack(anchor="w", padx=14, pady=(10, 2))
         self.log_box = ctk.CTkTextbox(lc, height=120, font=("Consolas", 11),
                                       fg_color=LOGBG, text_color="#7dd3fc",
                                       border_width=0, corner_radius=6)
-        self.log_box.pack(fill="x", padx=10, pady=(0, 10))
-
+        self.log_box.pack(fill="x", padx=14, pady=(0, 12))
+        
         # Grid 2 columnas
         g = ctk.CTkFrame(tab, fg_color="transparent")
         g.pack(fill="both", expand=True, padx=14, pady=4)
         g.grid_columnconfigure((0, 1), weight=1)
         g.grid_rowconfigure((0, 1), weight=1)
-
+        
         # Personalidad
-        cp = mk(g, fg_color=CARD2)
+        cp = mk(g, accent=True)
         cp.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=(0, 5))
-        lb(cp, "Personalidad", sz=11, bold=True, col=MUT).pack(anchor="w", padx=10, pady=(8, 2))
-        lb(cp, "Prompt", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(cp, "Personalidad", sz=11, bold=True, col=PURP).pack(anchor="w", padx=14, pady=(10, 2))
+        lb(cp, "Prompt activo", sz=10, col=MUT).pack(anchor="w", padx=14, pady=(2, 0))
         self.mode_select = cb(cp, self.prompt_files, command=self.change_mode)
-        self.mode_select.pack(fill="x", padx=10, pady=(0, 3)); 
-        # Establecer la personalidad guardada o la primera por defecto
+        self.mode_select.pack(fill="x", padx=14, pady=(0, 3))
         initial_prompt = config.get("SELECTED_PROMPT", self.prompt_files[0])
         if initial_prompt not in self.prompt_files:
             initial_prompt = self.prompt_files[0]
         self.mode_select.set(initial_prompt)
         
-        # Botón para crear nuevo prompt
-        btn_new_prompt = ctk.CTkButton(cp, text="+ Nueva Personalidad", fg_color=CARD, text_color=TXT,
-                                       hover_color=BORD, height=28, corner_radius=6,
+        btn_new_prompt = ctk.CTkButton(cp, text="+ Nueva Personalidad",
+                                       fg_color=CARD2, text_color=TXT,
+                                       hover_color=PURP, height=28, corner_radius=8,
                                        command=self._crear_nuevo_prompt)
-        btn_new_prompt.pack(fill="x", padx=10, pady=(4, 4))
-
-        # Botones de memoria y guardar
+        btn_new_prompt.pack(fill="x", padx=14, pady=(6, 4))
+        
         bp = ctk.CTkFrame(cp, fg_color="transparent")
-        bp.pack(fill="x", padx=10, pady=(6, 4))
+        bp.pack(fill="x", padx=14, pady=(6, 10))
         bp.grid_columnconfigure((0, 1), weight=1)
         ctk.CTkButton(bp, text="🗑  Borrar memoria", fg_color=RED, text_color=RED_T,
-                      hover_color="#991b1b", height=32, corner_radius=6,
+                      hover_color="#ef4444", height=32, corner_radius=8,
                       command=self._borrar_memoria).grid(row=0, column=0, padx=(0, 3), sticky="ew")
         ctk.CTkButton(bp, text="💾 Guardar config", fg_color=GRN, text_color=GRN_T,
-                      hover_color="#22c55e", height=32, corner_radius=6,
+                      hover_color="#10b981", height=32, corner_radius=8,
                       command=self._guardar_config_panel).grid(row=0, column=1, padx=(3, 0), sticky="ew")
-        ctk.CTkFrame(cp, height=6, fg_color="transparent").pack()
-
+        
         # PTT rápido
-        cv = mk(g, fg_color=CARD2)
+        cv = mk(g, accent=True)
         cv.grid(row=0, column=1, sticky="nsew", padx=(5, 0), pady=(0, 5))
-        lb(cv, "🎤  PTT", sz=11, bold=True, col=MUT).pack(anchor="w", padx=10, pady=(8, 4))
-        inf = mk(cv, fg_color=CARD)
-        inf.pack(fill="x", padx=10, pady=(0, 4))
+        lb(cv, "🎤  Push-to-Talk", sz=11, bold=True, col=PURP).pack(anchor="w", padx=14, pady=(10, 4))
+        inf = mk(cv)
+        inf.pack(fill="x", padx=14, pady=(0, 4))
         ir = ctk.CTkFrame(inf, fg_color="transparent")
-        ir.pack(fill="x", padx=8, pady=6)
+        ir.pack(fill="x", padx=10, pady=8)
         lb(ir, "CTRL +", sz=11, col=TXT).pack(side="left", padx=(0, 4))
         self.ptt_key_entry = ctk.CTkEntry(ir, width=60, font=("Consolas", 12, "bold"),
                                            fg_color=BG, text_color=TXT, border_color=BORD,
@@ -564,87 +358,28 @@ class App(ctk.CTk):
         self.ptt_key_entry.insert(0, saved_ptt_key)
         lb(ir, "Mantén para hablar", sz=10, col=MUT).pack(side="left")
         br = ctk.CTkFrame(cv, fg_color="transparent")
-        br.pack(fill="x", padx=10, pady=(0, 8))
-        br.grid_columnconfigure((0, 1), weight=1)
-        bt(br, "🎤 Hablar", GRN,  GRN_T,    self.ptt_click, h=32).grid(row=0, column=0, padx=(0, 3), sticky="ew")
-        bt(br, "🤖 Test",  PURP, "#e9d5ff", self.test_ia,   h=32).grid(row=0, column=1, padx=(3, 0), sticky="ew")
-
-        # Bot Chat IA
-        ia_frame = mk(tab, fg_color=CARD2)
-        ia_frame.pack(fill="x", padx=14, pady=(10, 6))
-        lb(ia_frame, "💬  Bot Chat IA", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
-        
-        # Comando IA
-        cmd_ia_frame = mk(ia_frame, fg_color="transparent")
-        cmd_ia_frame.pack(fill="x", padx=10, pady=(0, 8))
-        lb(cmd_ia_frame, "📝  Comando para activar IA:", sz=11, bold=True).pack(anchor="w", padx=10, pady=(10, 4))
-        self.ia_command_entry = ctk.CTkEntry(cmd_ia_frame, placeholder_text="!IA",
-                                           font=("Consolas", 12),
-                                           fg_color=CARD, text_color=TXT, border_color=BORD)
-        self.ia_command_entry.pack(fill="x", padx=10, pady=(0, 4))
-        self.ia_command_entry.insert(0, config.get("BOT_IA_COMMAND", "!IA"))
-        
-# Voz IA
-        lb(ia_frame, "Voz para respuestas IA:", sz=11, bold=True).pack(anchor="w", padx=10, pady=(10, 4))
-        saved_ia_voice = config.get("BOT_IA_VOICE", "es-MX-DaliaNeural")
-        self.ia_voice_var = ctk.StringVar(value=saved_ia_voice)
-        
-        self.ia_voice_menu = ctk.CTkOptionMenu(ia_frame, values=self.voices_all,
-                                             variable=self.ia_voice_var,
-                                             fg_color=CARD, button_color=BORD, dropdown_fg_color=CARD2,
-                                             text_color=TXT, font=("Arial", 11))
-        self.ia_voice_menu.pack(fill="x", padx=10, pady=(0, 6))
-        
-        # Botón guardar
-        btn_ia = ctk.CTkButton(ia_frame, text="💾 Guardar Config IA", fg_color=GRN, text_color=GRN_T,
-                              height=28, corner_radius=6, hover_color="#22c55e",
-                              command=self._guardar_ia_config)
-        btn_ia.pack(padx=10, pady=(0, 10))
-        
-        # Botón test voz IA
-        btn_test_ia = ctk.CTkButton(ia_frame, text="🧪 Test Voz IA", fg_color=PURP, text_color="#e9d5ff",
-                                   height=28, corner_radius=6,
-                                   command=self._test_ia_voice)
-        btn_test_ia.pack(padx=10, pady=(0, 10))
-        
-        # ── Comentarista ──────────────────────────────────────────────
-        cmt_frame = mk(ia_frame, fg_color=CARD)
-        cmt_frame.pack(fill="x", padx=10, pady=(0, 8))
-        lb(cmt_frame, "🎮  Comentarista de juego", sz=11, bold=True).pack(anchor="w", padx=10, pady=(8, 4))
-        
-        self.comentarista_activo = ctk.BooleanVar(value=False)
-        cmt_switch = ctk.CTkSwitch(cmt_frame, text="Activar comentarista",
-                                    variable=self.comentarista_activo,
-                                    fg_color=CARD2, button_color=PURP,
-                                    progress_color=BORD, font=("Arial", 11),
-                                    command=self.toggle_watcher)
-        cmt_switch.pack(anchor="w", padx=10, pady=(0, 4))
-        
-        saved_leer_chat = config.get("COMENTARISTA_LEER_CHAT", False)
-        self.comentarista_leer_chat = ctk.BooleanVar(value=saved_leer_chat)
-        ctk.CTkSwitch(cmt_frame, text="   Leer chat de Twitch",
-                      variable=self.comentarista_leer_chat,
-                      fg_color=CARD2, button_color=BLU,
-                      progress_color=BORD, font=("Arial", 10)).pack(anchor="w", padx=10, pady=(0, 8))
+        br.pack(fill="x", padx=14, pady=(4, 10))
+        bt(br, "🎤 Hablar", GRN, GRN_T, self.ptt_click, h=34).pack(fill="x")
         
         return tab
-
+    
     # ════════════════════════════════════════════════════════════════════════
     #  TAB AUDIO
     # ════════════════════════════════════════════════════════════════════════
     def _tab_audio(self, parent):
         tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
-        c = mk(tab)
+        
+        c = mk(tab, accent=True)
         c.pack(fill="x", padx=14, pady=(12, 6))
-        lb(c, "🔊  Dispositivos de audio", sz=12, bold=True).pack(anchor="w", padx=10, pady=(10, 4))
+        lb(c, "🔊  Dispositivos de audio", sz=12, bold=True).pack(anchor="w", padx=14, pady=(10, 4))
         for txt, attr, default in [
             ("Bot Speaker", "sp2", self._sp_default),
             ("IA Voz", "ia2", self._ia_default),
             ("Monitor", "mn2", self._sp_default),
         ]:
-            lb(c, txt, sz=10, col=MUT).pack(anchor="w", padx=10, pady=(4, 0))
+            lb(c, txt, sz=10, col=MUT).pack(anchor="w", padx=14, pady=(4, 0))
             vals = (["(Ninguno)"] + self.dev_names) if "Monitor" in txt else self.dev_names
-            bx = cb(c, vals); bx.pack(fill="x", padx=10, pady=(0, 4))
+            bx = cb(c, vals); bx.pack(fill="x", padx=14, pady=(0, 4))
             if default in vals:
                 bx.set(default)
             else:
@@ -653,314 +388,766 @@ class App(ctk.CTk):
         ctk.CTkFrame(c, height=6, fg_color="transparent").pack()
         
         # Equalizador
-        eq_frame = mk(tab, fg_color=CARD2)
+        eq_frame = mk(tab, accent=True)
         eq_frame.pack(fill="x", padx=14, pady=(12, 6))
-        lb(eq_frame, "🎛  Equalizador de voz IA", sz=12, bold=True).pack(anchor="w", padx=10, pady=(10, 4))
+        lb(eq_frame, "🎛  Equalizador de voz IA", sz=12, bold=True).pack(anchor="w", padx=14, pady=(10, 4))
+        lb(eq_frame, "Ajusta graves, agudos, velocidad y auto-tune de la voz", sz=10, col=MUT).pack(anchor="w", padx=14, pady=(0, 6))
         
-        # Graves (Bass)
-        bass_frame = ctk.CTkFrame(eq_frame, fg_color="transparent")
-        bass_frame.pack(fill="x", padx=10, pady=(4, 4))
-        lb(bass_frame, "🎸 Graves (Bass):", sz=10, col=MUT).pack(side="left")
-        self.bass_var = ctk.IntVar(value=config.get("EQ_BASS", 0))
-        bass_slider = ctk.CTkSlider(bass_frame, from_=-12, to=12, number_of_steps=24,
-                                  variable=self.bass_var, fg_color=CARD, progress_color=BORD)
-        bass_slider.pack(side="left", fill="x", expand=True, padx=(8, 8))
-        lb(bass_frame, "0", sz=9, col=MUT, width=30).pack(side="right")
+        eq_inner = ctk.CTkFrame(eq_frame, fg_color="transparent")
+        eq_inner.pack(fill="x", padx=14, pady=(0, 10))
         
-        # Agudos (Treble)
-        treble_frame = ctk.CTkFrame(eq_frame, fg_color="transparent")
-        treble_frame.pack(fill="x", padx=10, pady=(0, 4))
-        lb(treble_frame, "🎵 Agudos (Treble):", sz=10, col=MUT).pack(side="left")
-        self.treble_var = ctk.IntVar(value=config.get("EQ_TREBLE", 0))
-        treble_slider = ctk.CTkSlider(treble_frame, from_=-12, to=12, number_of_steps=24,
-                                  variable=self.treble_var, fg_color=CARD, progress_color=BORD)
-        treble_slider.pack(side="left", fill="x", expand=True, padx=(8, 8))
-        lb(treble_frame, "0", sz=9, col=MUT, width=30).pack(side="right")
-        
-        # Velocidad (Speed)
-        speed_frame = ctk.CTkFrame(eq_frame, fg_color="transparent")
-        speed_frame.pack(fill="x", padx=10, pady=(0, 4))
-        lb(speed_frame, "⚡ Velocidad:", sz=10, col=MUT).pack(side="left")
-        self.speed_var = ctk.IntVar(value=config.get("EQ_SPEED", 0))
-        speed_slider = ctk.CTkSlider(speed_frame, from_=-50, to=50, number_of_steps=100,
-                                    variable=self.speed_var, fg_color=CARD, progress_color=BORD)
-        speed_slider.pack(side="left", fill="x", expand=True, padx=(8, 8))
-        lb(speed_frame, "0%", sz=9, col=MUT, width=30).pack(side="right")
-        
-        # Auto-Tune
-        autotune_frame = ctk.CTkFrame(eq_frame, fg_color="transparent")
-        autotune_frame.pack(fill="x", padx=10, pady=(0, 4))
-        lb(autotune_frame, "🎤 Auto-Tune:", sz=10, col=MUT).pack(side="left")
-        self.autotune_var = ctk.IntVar(value=config.get("EQ_AUTOTUNE", 0))
-        autotune_slider = ctk.CTkSlider(autotune_frame, from_=0, to=100, number_of_steps=100,
-                                    variable=self.autotune_var, fg_color=CARD, progress_color=BORD)
-        autotune_slider.pack(side="left", fill="x", expand=True, padx=(8, 8))
-        lb(autotune_frame, "0%", sz=9, col=MUT, width=30).pack(side="right")
-        
-        # Botón guardar ecualizador
-        eq_btn = ctk.CTkButton(eq_frame, text="💾 Guardar EQ", fg_color=GRN, text_color=GRN_T,
-                              height=26, corner_radius=6, hover_color="#22c55e",
-                              command=self._guardar_eq)
-        eq_btn.pack(padx=10, pady=(8, 10))
-        
-        return tab
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  TAB TRADUCTOR
-    # ════════════════════════════════════════════════════════════════════════
-    def _tab_traductor(self, parent):
-        tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
-        c = mk(tab)
-        c.pack(fill="x", padx=14, pady=(12, 6))
-        lb(c, "🈳  Traductor en tiempo real", sz=12, bold=True).pack(anchor="w", padx=10, pady=(10, 6))
-
-# Traducir a + Motor de traducción
-        opt_row = ctk.CTkFrame(c, fg_color="transparent")
-        opt_row.pack(fill="x", padx=10, pady=(0, 6))
-        lb(opt_row, "OCR: EasyOCR (offline)", sz=11, col=MUT).pack(side="left", padx=(0, 6))
-        lb(opt_row, "Traducir a:", sz=11, col=MUT).pack(side="left", padx=(0, 6))
-        self.idioma_var = ctk.StringVar(value="español")
-        cb(opt_row, ["español", "inglés", "portugués", "francés", "alemán"],
-           variable=self.idioma_var).pack(side="left", padx=(0, 12))
-        
-        # Voz para traducción
-        self.leer_voz_var = ctk.BooleanVar(value=False)
-        ctk.CTkSwitch(opt_row, text="🔊 Voz", variable=self.leer_voz_var,
-                      fg_color=CARD2, button_color=GRN,
-                      progress_color=BORD, font=("Arial", 10)).pack(side="left", padx=(12, 0))
-        
-        # Motor de traducción (todos gratuitos)
-        lb(opt_row, "Motor:", sz=11, col=MUT).pack(side="left", padx=(12, 6))
-        self.trad_motor = ctk.CTkOptionMenu(opt_row, values=["Google (gratis)", "MyMemory (gratis)"],
-                                             fg_color=CARD, button_color=BORD, dropdown_fg_color=CARD2,
-                                             text_color=TXT, font=("Arial", 11))
-        self.trad_motor.pack(side="left", fill="x", expand=True)
-        
-        g = ctk.CTkFrame(c, fg_color="transparent")
-        g.pack(fill="x", padx=10, pady=(0, 6))
-        g.grid_columnconfigure((0, 1), weight=1)
-        for txt, ico, bgc, fgc, cmd, r, col in [
-            ("Capturar área",     "📷", BLU,   BLU_T,  self.trad_area_unica,    0, 0),
-            ("Pantalla completa", "🖥", CARD2, TXT,    self.trad_pantalla_unica, 0, 1),
-            ("Área continua",     "🔄", AMB,   AMB_T,  self.trad_continuo_area,  1, 0),
-            ("Pantalla continua", "♾", AMB,   AMB_T,  self.trad_continuo_full,  1, 1),
+        for label, var_name, attr, from_, to_, steps, suffix, col_label in [
+            ("🎸 Graves (Bass)", "EQ_BASS", "bass_var", -12, 12, 24, "", MUT),
+            ("🎵 Agudos (Treble)", "EQ_TREBLE", "treble_var", -12, 12, 24, "", MUT),
+            ("⚡ Velocidad", "EQ_SPEED", "speed_var", -50, 50, 100, "%", MUT),
+            ("🎤 Auto-Tune", "EQ_AUTOTUNE", "autotune_var", 0, 100, 100, "%", MUT),
         ]:
-            ctk.CTkButton(g, text=f"{ico}  {txt}", fg_color=bgc, text_color=fgc,
-                          hover_color=bgc, font=("Arial", 12, "bold"),
-                          corner_radius=8, height=42, command=cmd).grid(
-                              row=r, column=col, padx=4, pady=4, sticky="ew")
-        si = ctk.CTkFrame(c, fg_color="transparent")
-        si.pack(fill="x", padx=10, pady=(0, 4))
-        lb(si, "Intervalo:", sz=11, col=MUT).pack(side="left")
-        self.trad_intervalo_var = ctk.IntVar(value=4)
-        self._tlbl = lb(si, "4s", sz=11, bold=True)
-        ctk.CTkSlider(si, from_=2, to=30, number_of_steps=28,
-                      variable=self.trad_intervalo_var, fg_color=BORD,
-                      progress_color=PURP, button_color=PURP, button_hover_color="#7c58c0",
-                      command=lambda v: self._tlbl.configure(text=f"{int(v)}s")).pack(
-                          side="left", fill="x", expand=True, padx=8)
-        self._tlbl.pack(side="left", padx=(0, 4))
-        self.btn_detener_trad = bt(c, "⏹  Detener traducción", RED, RED_T,
-                                   self.detener_traduccion, h=34)
-        self.btn_detener_trad.pack(fill="x", padx=10, pady=(2, 10))
-        self.btn_detener_trad.configure(state="disabled")
+            row = ctk.CTkFrame(eq_inner, fg_color="transparent")
+            row.pack(fill="x", pady=2)
+            lb(row, label, sz=10, col=col_label, width=110).pack(side="left")
+            var = ctk.IntVar(value=config.get(var_name, 0))
+            setattr(self, attr, var)
+            slider = ctk.CTkSlider(row, from_=from_, to=to_, number_of_steps=steps,
+                                   variable=var, fg_color=CARD, progress_color=BORD)
+            slider.pack(side="left", fill="x", expand=True, padx=(8, 8))
+            lb(row, f"{var.get()}{suffix}", sz=9, col=MUT, width=35).pack(side="right")
+        
+        eq_btn = ctk.CTkButton(eq_frame, text="💾 Guardar EQ", fg_color=GRN, text_color=GRN_T,
+                              height=30, corner_radius=8, hover_color="#10b981",
+                              command=self._guardar_eq)
+        eq_btn.pack(padx=14, pady=(0, 10))
+        
         return tab
-
+    
     # ════════════════════════════════════════════════════════════════════════
     #  TAB BOT SPEAKER
     # ════════════════════════════════════════════════════════════════════════
     def _tab_bot_speaker(self, parent):
         tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
-        c = mk(tab)
+        
+        c = mk(tab, accent=True)
         c.pack(fill="x", padx=14, pady=(12, 6))
-        lb(c, "🔧  Bot Speaker", sz=12, bold=True).pack(anchor="w", padx=10, pady=(10, 2))
-        lb(c, "Comandos para reproducir audio en Twitch.", sz=10, col=MUT).pack(
-            anchor="w", padx=10, pady=(0, 8))
-
-        self.voices_male = ["es_ES-AlvaroNeural", "es_MX-DarioNeural", "es_AR-TonoNeural"]
-        self.voices_female = ["es_ES-ElviraNeural", "es_MX-LiaNeural", "es_MX-DaliaNeural", "es_AR-EmiliaNeural"]
-
-        cmd_frame = mk(c, fg_color=CARD2)
-        cmd_frame.pack(fill="x", padx=10, pady=(0, 8))
-        lb(cmd_frame, "📝  ComandoSpeak (voz masculina):", sz=11, bold=True).pack(anchor="w", padx=10, pady=(10, 4))
-        self.cmd_speak_entry = ctk.CTkEntry(cmd_frame, placeholder_text="!sp",
+        lb(c, "🔧  Bot Speaker", sz=12, bold=True).pack(anchor="w", padx=14, pady=(10, 2))
+        lb(c, "Comandos para reproducir audio en Twitch", sz=10, col=MUT).pack(anchor="w", padx=14, pady=(0, 6))
+        
+        self.voices_male = ["es-ES-AlvaroNeural", "es-MX-DarioNeural", "es-AR-TonoNeural"]
+        self.voices_female = ["es-ES-ElviraNeural", "es-MX-LiaNeural", "es-MX-DaliaNeural", "es-AR-EmiliaNeural"]
+        
+        saved_male = config.get("BOT_VOICE_MALE", "es_MX-DarioNeural")
+        saved_female = config.get("BOT_VOICE_FEMALE", "es-MX-DaliaNeural")
+        
+        cmd_frame = mk(c)
+        cmd_frame.pack(fill="x", padx=14, pady=(0, 10))
+        
+        # Fila: Comando Speak masculino
+        row1 = ctk.CTkFrame(cmd_frame, fg_color="transparent")
+        row1.pack(fill="x", padx=14, pady=(10, 4))
+        row1.grid_columnconfigure(1, weight=1)
+        lb(row1, "!sp comando:", sz=10, col=MUT, width=95).grid(row=0, column=0, sticky="w")
+        self.cmd_speak_entry = ctk.CTkEntry(row1, placeholder_text="!sp",
                                         font=("Consolas", 12),
                                         fg_color=CARD, text_color=TXT, border_color=BORD)
-        self.cmd_speak_entry.pack(fill="x", padx=10, pady=(0, 4))
+        self.cmd_speak_entry.grid(row=0, column=1, sticky="ew", padx=(8, 0))
         self.cmd_speak_entry.insert(0, config.get("BOT_SPEAK_CMD", "!sp"))
-
-        self.voice_male_var = ctk.StringVar(value=config.get("BOT_VOICE_MALE", "es_MX-DarioNeural"))
-        self.voice_male_menu = ctk.CTkOptionMenu(cmd_frame, values=self.voices_male,
+        
+        lb(row1, "Voz:", sz=10, col=MUT, width=30).grid(row=0, column=2, padx=(8, 4))
+        self.voice_male_var = ctk.StringVar(value=saved_male)
+        self.voice_male_menu = ctk.CTkOptionMenu(row1, values=self.voices_male,
                                               variable=self.voice_male_var,
-                                              fg_color=CARD, button_color=BORD, dropdown_fg_color=CARD2,
-                                              text_color=TXT, font=("Arial", 11))
-        self.voice_male_menu.pack(fill="x", padx=10, pady=(0, 6))
-
-        lb(cmd_frame, "ComandoSpeakMap (voz femenina):", sz=11, bold=True).pack(anchor="w", padx=10, pady=(10, 4))
-        self.cmd_speakmap_entry = ctk.CTkEntry(cmd_frame, placeholder_text="!spm",
+                                              fg_color=CARD, button_color=PURP, dropdown_fg_color=CARD2,
+                                              text_color=TXT, font=("Segoe UI", 11), width=140)
+        self.voice_male_menu.grid(row=0, column=3, padx=(0, 0))
+        
+        # Separador
+        ctk.CTkFrame(cmd_frame, height=1, fg_color="#2a2a3e").pack(fill="x", padx=14, pady=4)
+        
+        # Fila: Comando SpeakMap femenino
+        row2 = ctk.CTkFrame(cmd_frame, fg_color="transparent")
+        row2.pack(fill="x", padx=14, pady=(4, 10))
+        row2.grid_columnconfigure(1, weight=1)
+        lb(row2, "!spm comando:", sz=10, col=MUT, width=95).grid(row=0, column=0, sticky="w")
+        self.cmd_speakmap_entry = ctk.CTkEntry(row2, placeholder_text="!spm",
                                               font=("Consolas", 12),
                                               fg_color=CARD, text_color=TXT, border_color=BORD)
-        self.cmd_speakmap_entry.pack(fill="x", padx=10, pady=(0, 4))
+        self.cmd_speakmap_entry.grid(row=0, column=1, sticky="ew", padx=(8, 0))
         self.cmd_speakmap_entry.insert(0, config.get("BOT_SPEAKMAP_CMD", "!spm"))
-
-        saved_male = config.get("BOT_VOICE_MALE", "es_MX-DarioNeural")
-        saved_female = config.get("BOT_VOICE_FEMALE", "es_MX-DaliaNeural")
         
-        self.voice_male_var = ctk.StringVar(value=saved_male)
-        self.voice_male_menu = ctk.CTkOptionMenu(cmd_frame, values=self.voices_male,
-                                              variable=self.voice_male_var,
-                                              fg_color=CARD, button_color=BORD, dropdown_fg_color=CARD2,
-                                              text_color=TXT, font=("Arial", 11))
-        self.voice_male_menu.pack(fill="x", padx=10, pady=(0, 6))
-
+        lb(row2, "Voz:", sz=10, col=MUT, width=30).grid(row=0, column=2, padx=(8, 4))
         self.voice_female_var = ctk.StringVar(value=saved_female)
-        self.voice_female_menu = ctk.CTkOptionMenu(cmd_frame, values=self.voices_female,
+        self.voice_female_menu = ctk.CTkOptionMenu(row2, values=self.voices_female,
                                                     variable=self.voice_female_var,
-                                                    fg_color=CARD, button_color=BORD, dropdown_fg_color=CARD2,
-                                                    text_color=TXT, font=("Arial", 11))
-        self.voice_female_menu.pack(fill="x", padx=10, pady=(0, 6))
-
+                                                    fg_color=CARD, button_color=PURP, dropdown_fg_color=CARD2,
+                                                    text_color=TXT, font=("Segoe UI", 11), width=140)
+        self.voice_female_menu.grid(row=0, column=3)
+        
+        # Botones
         btn_frame = ctk.CTkFrame(c, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=10, pady=(0, 8))
+        btn_frame.pack(fill="x", padx=14, pady=(0, 10))
+        btn_frame.grid_columnconfigure((0, 1), weight=1)
         ctk.CTkButton(btn_frame, text="💾 Guardar comandos", fg_color=GRN, text_color=GRN_T,
-                     height=30, corner_radius=8, hover_color="#22c55e",
-                     command=self._guardar_bot_cmds).pack(side="left", fill="x", expand=True, padx=(0, 4))
-        ctk.CTkButton(btn_frame, text="🧪 Test", fg_color=PURP, text_color="#e9d5ff",
-                     height=30, corner_radius=8,
-                     command=self._test_bot_speaker).pack(side="left", fill="x", expand=True, padx=(4, 0))
-
-        inf = mk(c, fg_color=CARD2)
-        inf.pack(fill="x", padx=10, pady=(0, 10))
-        lb(inf, "ℹ  Uso:", sz=11, bold=True).pack(anchor="w", padx=10, pady=(8, 2))
-        lb(inf, "• !sp <mensaje> — El bot dice el mensaje\n"
-                "• !spm <audio> — Reproduce audio local",
-           sz=10, col=MUT, justify="left").pack(anchor="w", padx=10, pady=(0, 10))
-
+                     height=34, corner_radius=8, hover_color="#10b981",
+                     command=self._guardar_bot_cmds).grid(row=0, column=0, padx=(0, 4), sticky="ew")
+        ctk.CTkButton(btn_frame, text="🧪 Test", fg_color=PURP, text_color="#f3e8ff",
+                     height=34, corner_radius=8, hover_color="#a855f7",
+                     command=self._test_bot_speaker).grid(row=0, column=1, padx=(4, 0), sticky="ew")
+        
+        # ── Sonidos personalizados ──
+        audio_card = mk(tab, accent=True)
+        audio_card.pack(fill="x", padx=14, pady=(8, 6))
+        lb(audio_card, "🔊  Sonidos personalizados", sz=12, bold=True).pack(anchor="w", padx=14, pady=(10, 2))
+        lb(audio_card, "Sube archivos MP3 y asígnales un comando para Twitch", sz=10, col=MUT).pack(anchor="w", padx=14, pady=(0, 6))
+        
+        self._audio_slots = []
+        audio_inner = ctk.CTkFrame(audio_card, fg_color="transparent")
+        audio_inner.pack(fill="x", padx=14, pady=(0, 10))
+        
+        for i in range(1, 6):
+            row = ctk.CTkFrame(audio_inner, fg_color="transparent")
+            row.pack(fill="x", pady=3)
+            row.grid_columnconfigure(2, weight=1)
+            
+            lb(row, f"#{i}:", sz=10, col=MUT, width=20).grid(row=0, column=0)
+            
+            path_var = ctk.StringVar(value=config.get(f"AUDIO_FILE_{i}", ""))
+            entry_path = ctk.CTkEntry(row, textvariable=path_var,
+                                       font=("Consolas", 10), fg_color=CARD, text_color=MUT,
+                                       border_color="#2a2a3e", state="readonly", width=200)
+            entry_path.grid(row=0, column=1, padx=(4, 4))
+            
+            cmd_var = ctk.StringVar(value=config.get(f"AUDIO_CMD_{i}", ""))
+            entry_cmd = ctk.CTkEntry(row, textvariable=cmd_var, placeholder_text="!comando",
+                                      font=("Consolas", 11, "bold"), width=100,
+                                      fg_color=CARD, text_color=TXT, border_color=BORD)
+            entry_cmd.grid(row=0, column=2, sticky="ew", padx=(0, 4))
+            
+            ctk.CTkButton(row, text="📂", fg_color=CARD2, text_color=TXT, width=30, height=26,
+                          corner_radius=5, command=lambda idx=i, pv=path_var: self._seleccionar_audio(idx, pv)).grid(row=0, column=3, padx=(0, 2))
+            ctk.CTkButton(row, text="▶", fg_color=CARD2, text_color=GRN_T, width=30, height=26,
+                          corner_radius=5, command=lambda pv=path_var: self._reprobar_audio(pv.get())).grid(row=0, column=4)
+            
+            self._audio_slots.append((i, path_var, cmd_var))
+        
+        ctk.CTkButton(audio_card, text="💾 Guardar sonidos", fg_color=GRN, text_color=GRN_T,
+                      height=30, corner_radius=8, hover_color="#10b981",
+                      command=self._guardar_audio_slots).pack(padx=14, pady=(0, 10))
+        
         return tab
+    
+    # ════════════════════════════════════════════════════════════════════════
+    #  TAB CHAT BOT IA
+    # ════════════════════════════════════════════════════════════════════════
+    def _tab_comentarista(self, parent):
+        tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
+        
+        # ── IA Chat para Twitch ──
+        ia_card = mk(tab, accent=True)
+        ia_card.pack(fill="x", padx=14, pady=(12, 6))
+        lb(ia_card, "🤖  IA para Chat de Twitch", sz=13, bold=True).pack(anchor="w", padx=14, pady=(10, 2))
+        lb(ia_card, "Los viewers escriben el comando en el chat y la IA responde con voz", sz=10, col=MUT).pack(anchor="w", padx=14, pady=(0, 6))
+        
+        ia_grid = ctk.CTkFrame(ia_card, fg_color="transparent")
+        ia_grid.pack(fill="x", padx=14, pady=(4, 10))
+        ia_grid.grid_columnconfigure(1, weight=1)
+        
+        lb(ia_grid, "Comando:", sz=11, col=MUT).grid(row=0, column=0, sticky="w")
+        self.ia_cmd_entry = ctk.CTkEntry(ia_grid, placeholder_text="!IA",
+                                          font=("Consolas", 12, "bold"),
+                                          fg_color=CARD, text_color=TXT, border_color=BORD, width=100)
+        self.ia_cmd_entry.grid(row=0, column=1, sticky="w", padx=(8, 0), pady=3)
+        ia_cmd_val = config.get("BOT_IA_COMMAND", "!IA")
+        self.ia_cmd_entry.insert(0, ia_cmd_val)
+        
+        lb(ia_grid, "Voz TTS:", sz=11, col=MUT).grid(row=1, column=0, sticky="w", pady=(6, 0))
+        voz_row = ctk.CTkFrame(ia_grid, fg_color="transparent")
+        voz_row.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(6, 0))
+        voz_row.grid_columnconfigure(0, weight=1)
+        self.ia_voice_menu = ctk.CTkComboBox(voz_row, values=self.voices_all,
+                                              fg_color=CARD, button_color=PURP,
+                                              dropdown_fg_color=CARD2, text_color=TXT,
+                                              border_color=BORD, font=("Segoe UI", 11))
+        self.ia_voice_menu.grid(row=0, column=0, sticky="ew")
+        self.ia_voice_menu.set(config.get("BOT_IA_VOICE", "es-MX-DaliaNeural"))
+        ctk.CTkButton(voz_row, text="🔊 Test", fg_color=CARD2, text_color=TXT,
+                      hover_color=PURP, height=28, corner_radius=6,
+                      command=self._test_ia_voice).grid(row=0, column=1, padx=(6, 0))
+        
+        ctk.CTkButton(ia_grid, text="💾 Guardar comando IA", fg_color=GRN, text_color=GRN_T,
+                      height=30, corner_radius=8, hover_color="#10b981",
+                      command=self._guardar_ia_command).grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+        
+        # ── Comentarista ──
+        c = mk(tab, accent=True)
+        c.pack(fill="x", padx=14, pady=(8, 6))
+        lb(c, "🎮  Comentarista IA", sz=13, bold=True).pack(anchor="w", padx=14, pady=(10, 2))
+        lb(c, "Analiza la pantalla y comenta el juego automáticamente", sz=10, col=MUT).pack(anchor="w", padx=14, pady=(0, 6))
+        
+        opts = mk(c)
+        opts.pack(fill="x", padx=14, pady=(0, 10))
+        
+        grid = ctk.CTkFrame(opts, fg_color="transparent")
+        grid.pack(fill="x", padx=14, pady=(10, 4))
+        grid.grid_columnconfigure((0, 1), weight=1)
+        
+        lb(grid, "Juego:", sz=11, col=MUT).grid(row=0, column=0, sticky="w", pady=3)
+        game_row = ctk.CTkFrame(grid, fg_color="transparent")
+        game_row.grid(row=0, column=1, sticky="ew", padx=(8, 0), pady=3)
+        game_row.grid_columnconfigure(0, weight=1)
+        juego_inicial = config.get("COMENTARISTA_JUEGO", "")
+        self.juego_entry = ctk.CTkEntry(game_row, placeholder_text="ej: Minecraft",
+                                         font=("Segoe UI", 12, "bold"),
+                                         fg_color=CARD, text_color=TXT, border_color=BORD)
+        self.juego_entry.grid(row=0, column=0, sticky="ew")
+        if juego_inicial:
+            self.juego_entry.insert(0, juego_inicial)
+        detect_btn = ctk.CTkButton(game_row, text="🎮", fg_color=CARD2, text_color=TXT,
+                                   hover_color=PURP, width=32, height=28, corner_radius=6,
+                                   command=self._detectar_juego_twitch)
+        detect_btn.grid(row=0, column=1, padx=(6, 0))
+        
+        lb(grid, "Intervalo (seg):", sz=11, col=MUT).grid(row=1, column=0, sticky="w", pady=3)
+        irow = ctk.CTkFrame(grid, fg_color="transparent")
+        irow.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=3)
+        self.comentarista_intervalo = ctk.CTkEntry(irow, placeholder_text="30",
+                                                    fg_color=CARD, text_color=TXT, border_color=BORD,
+                                                    font=("Segoe UI", 11), width=80)
+        self.comentarista_intervalo.pack(side="left")
+        self.comentarista_intervalo.insert(0, str(config.get("COMENTARISTA_INTERVALO", 30)))
+        
+        lb(grid, "Voz:", sz=11, col=MUT).grid(row=2, column=0, sticky="w", pady=3)
+        self.comentarista_voice = ctk.CTkComboBox(grid, values=self.voices_all,
+                                                    fg_color=CARD, button_color=PURP,
+                                                    dropdown_fg_color=CARD2, text_color=TXT,
+                                                    border_color=BORD, font=("Segoe UI", 11))
+        self.comentarista_voice.grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=3)
+        self.comentarista_voice.set(config.get("COMENTARISTA_VOICE", "es-MX-DaliaNeural"))
+        
+        lb(grid, "Modo analisis:", sz=11, col=MUT).grid(row=3, column=0, sticky="w", pady=3)
+        self.comentarista_modo = ctk.CTkComboBox(grid, 
+            values=[
+                "OCR (Solo Lectura)",
+                "OpenCV + OCR + IA",
+                "Groq Vision (Máxima Exp)",
+                "Groq Vision (Exp máxima)"
+            ],
+            fg_color=CARD, button_color=PURP,
+            dropdown_fg_color=CARD2, text_color=TXT,
+            border_color=BORD, font=("Segoe UI", 11))
+        self.comentarista_modo.grid(row=3, column=1, sticky="ew", padx=(8, 0), pady=3)
+        modo_guardado = config.get("COMENTARISTA_MODO", "OpenCV + OCR + IA")
+        self.comentarista_modo.set(modo_guardado)
+        
+        btns = ctk.CTkFrame(c, fg_color="transparent")
+        btns.pack(fill="x", padx=14, pady=(0, 10))
+        btns.grid_columnconfigure((0, 1, 2), weight=1)
+        
+        self.comentarista_btn = ctk.CTkButton(btns, text="▶ Iniciar", fg_color=GRN, text_color=GRN_T,
+            font=("Segoe UI", 12, "bold"), corner_radius=10, height=36,
+            command=self._iniciar_comentarista)
+        self.comentarista_btn.grid(row=0, column=0, padx=(0, 4), sticky="ew")
+        
+        ctk.CTkButton(btns, text="⏹ Detener", fg_color=RED, text_color=RED_T,
+            font=("Segoe UI", 12, "bold"), corner_radius=10, height=36,
+            command=self._detener_comentarista).grid(row=0, column=1, padx=(4, 4), sticky="ew")
+        
+        ctk.CTkButton(btns, text="💾 Guardar", fg_color=BLU, text_color=BLU_T,
+            font=("Segoe UI", 11), corner_radius=10, height=36,
+            command=self._guardar_config_comentarista).grid(row=0, column=2, padx=(4, 0), sticky="ew")
+        
+        # Botón EasyOCR toggle
+        btn_frame2 = ctk.CTkFrame(c, fg_color="transparent")
+        btn_frame2.pack(fill="x", padx=14, pady=(0, 10))
+        eocr_off = config.get("EASYOCR_DISABLED", "0") == "1"
+        self.easyocr_toggle = ctk.CTkButton(btn_frame2,
+            text="🧠 EasyOCR: OFF (0MB)" if eocr_off else "🧠 EasyOCR: ON (500MB)",
+            fg_color=RED if eocr_off else GRN,
+            text_color=RED_T if eocr_off else GRN_T,
+            font=("Segoe UI", 11, "bold"), corner_radius=8, height=30,
+            command=self._toggle_easyocr)
+        self.easyocr_toggle.pack(fill="x")
+        
+        c_log_frame = mk(tab)
+        c_log_frame.pack(fill="both", expand=True, padx=14, pady=(8, 12))
+        lb(c_log_frame, "📋  Log del Comentarista", sz=10, bold=True, col=MUT).pack(anchor="w", padx=10, pady=(6, 2))
+        self.comentarista_log = ctk.CTkTextbox(c_log_frame, fg_color=LOGBG, text_color=TXT,
+                                                font=("Consolas", 10), height=170)
+        self.comentarista_log.pack(fill="both", expand=True, padx=10, pady=(2, 10))
+        
+        return tab
+    
+    def _detectar_juego_twitch(self):
+        """Obtiene el juego actual desde la API de Twitch"""
+        tok = config.get("TWITCH_TOKEN", "")
+        chan = config.get("CHANNEL", "")
+        if not tok or not chan:
+            self._log_comentarista("⚠  No hay sesión de Twitch activa")
+            return
+        self._log_comentarista("🔍  Detectando juego desde Twitch...")
+        import threading
+        threading.Thread(target=self._fetch_game_thread, args=(tok, chan), daemon=True).start()
+    
+    def _fetch_game_thread(self, tok, chan):
+        juego = fetch_twitch_game(tok, chan)
+        if juego:
+            self.juego_entry.delete(0, "end")
+            self.juego_entry.insert(0, juego)
+            config["COMENTARISTA_JUEGO"] = juego
+            self._log_comentarista(f"✅  Juego detectado: {juego}")
+        else:
+            self._log_comentarista("❌  No se pudo detectar el juego")
+    
+    def _test_api(self, provider, key):
+        if not key:
+            self.log(f"❌  Ingresa una API Key primero")
+            return
+        if provider == "cerebras":
+            import requests
+            try:
+                r = requests.get("https://api.cerebras.ai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {key}"}, timeout=10)
+                self.log(f"✅  Cerebras API responde: {r.status_code}")
+            except Exception as e:
+                self.log(f"❌  Cerebras error: {e}")
+        elif provider == "groq":
+            import requests
+            try:
+                r = requests.get("https://api.groq.com/openai/v1/models",
+                    headers={"Authorization": f"Bearer {key}"}, timeout=10)
+                self.log(f"✅  Groq API responde: {r.status_code}")
+            except Exception as e:
+                self.log(f"❌  Groq error: {e}")
+    
+    def _iniciar_comentarista(self):
+        modo = self.comentarista_modo.get()
+        juego = self.juego_entry.get().strip()
+        voz = self.comentarista_voice.get()
+        
+        from src.core.config import load_config, save_config
+        cfg = load_config()
+        cfg["COMENTARISTA_JUEGO"] = juego
+        cfg["COMENTARISTA_VOICE"] = voz
+        cfg["COMENTARISTA_MODO"] = modo
+        save_config(cfg)
+        for k, v in cfg.items():
+            config[k] = v
+        
+        usar_groq = "Groq" in modo
+        usar_ia = "IA" in modo
+        solo_lectura = "Solo Lectura" in modo
+        
+        ia_key = ""
+        groq_key = ""
+        if usar_groq:
+            groq_key = cfg.get("GROQ_API_KEY", "")
+            if not groq_key:
+                self.log("❌  Se necesita GROQ_API_KEY para Groq Vision")
+                return
+        elif usar_ia:
+            ia_key = cfg.get("CEREBRAS_API_KEY", "")
+            if ia_key:
+                self.log("🤖  Cerebras disponible para comentarios IA")
+            else:
+                self.log("ℹ️  OpenCV + OCR sin IA (reglas fijas)")
+        
+        if self.game_watcher:
+            self.game_watcher.detener()
+        
+        self.game_watcher = GameWatcher(
+            speak_fn=speak,
+            stop_audio_fn=stop_audio,
+            get_devices_fn=lambda: self.get_devices(),
+            log_fn=self._log_comentarista
+        )
+        self.game_watcher.iniciar(voz=voz, juego=juego, modo=modo, groq_key=ia_key, solo_lectura=solo_lectura)
+        self.log(f"🎮 Comentarista iniciado ({modo})")
+    
+    def _detener_comentarista(self):
+        if self.game_watcher:
+            self.game_watcher.detener()
+            self.game_watcher = None
+        self.log("⏹ Comentarista detenido")
+    
+    def _iniciar_player_ia(self):
+        from src.core.config import load_config, save_config
+        
+        player_activo = self.player_activo.get()
+        modo = self.player_modo.get()
+        juego_tipo = self.player_juego.get()
+        
+        cfg = load_config()
+        cfg["PLAYER_ACTIVO"] = player_activo
+        cfg["PLAYER_MODO"] = modo
+        cfg["PLAYER_JUEGO"] = juego_tipo
+        save_config(cfg)
+        for k, v in cfg.items():
+            config[k] = v
+        
+        if self.player_ia:
+            self.player_ia.detener()
+        
+        self.player_ia = PlayerIAGamer(
+            modo=modo,
+            juego_tipo=juego_tipo,
+            player_activo=player_activo,
+            log_fn=self._log_player_ia
+        )
+        
+        self.player_ia.iniciar()
+        self._log_player_ia(f"🎮 Player IA iniciado ({player_activo} - {modo} - {juego_tipo})")
+    
+    def _detener_player_ia(self):
+        if self.player_ia:
+            self.player_ia.detener()
+            self.player_ia = None
+        self._log_player_ia("⏹ Player IA detenido")
+    
+    def _pausar_player_ia(self):
+        if self.player_ia:
+            if self.player_ia._pausado:
+                self.player_ia.reanudar()
+                self._log_player_ia("▶ Player IA REANUDADO")
+            else:
+                self.player_ia.pausar()
+                self._log_player_ia("⏸ Player IA PAUSADO")
+    
+    def _guardar_config_comentarista(self):
+        from src.core.config import load_config, save_config
+        cfg = load_config()
+        cfg["COMENTARISTA_JUEGO"] = self.juego_entry.get().strip()
+        cfg["COMENTARISTA_INTERVALO"] = int(self.comentarista_intervalo.get().strip() or 30)
+        cfg["COMENTARISTA_VOICE"] = self.comentarista_voice.get()
+        cfg["COMENTARISTA_MODO"] = self.comentarista_modo.get()
+        cfg.pop("SUBTITULOS_INTERVALO", None)
+        cfg.pop("PLAYER_MODO", None)
+        cfg.pop("PLAYER_INPUT", None)
+        cfg.pop("PLAYER_JUEGO", None)
+        save_config(cfg)
+        for k, v in cfg.items():
+            config[k] = v
+        self.log("✅ Configuración del comentarista guardada")
+    
+    def _toggle_easyocr(self):
+        estado = config.get("EASYOCR_DISABLED", "0")
+        if estado == "1":
+            config["EASYOCR_DISABLED"] = "0"
+            self.easyocr_toggle.configure(text="🧠 EasyOCR: ON (500MB)", fg_color=GRN, text_color=GRN_T)
+            self.log("🧠 EasyOCR activado - recargar módulo si es necesario")
+        else:
+            config["EASYOCR_DISABLED"] = "1"
+            self.easyocr_toggle.configure(text="🧠 EasyOCR: OFF (0MB)", fg_color=RED, text_color=RED_T)
+            self.log("🧠 EasyOCR desactivado - ahorrando ~500MB RAM")
+        from src.core.config import save_config
+        cfg = load_config()
+        cfg["EASYOCR_DISABLED"] = config["EASYOCR_DISABLED"]
+        save_config(cfg)
 
+    def _guardar_ia_command(self):
+        cmd = self.ia_cmd_entry.get().strip()
+        voz = self.ia_voice_menu.get()
+        if not cmd:
+            self.log("❌  Ingresa un comando válido")
+            return
+        from src.core.config import load_config, save_config
+        cfg = load_config()
+        cfg["BOT_IA_COMMAND"] = cmd
+        cfg["BOT_IA_VOICE"] = voz
+        save_config(cfg)
+        config["BOT_IA_COMMAND"] = cmd
+        config["BOT_IA_VOICE"] = voz
+        self.log(f"✅  Comando IA guardado: {cmd} → voz: {voz}")
+
+    def _test_ia_voice(self):
+        voz = self.ia_voice_menu.get()
+        from src.audio import speak
+        speak("Hola, soy tu asistente de voz. Esta es una prueba.", voz, 0)
+
+    def _log_comentarista(self, msg):
+        self.comentarista_log.insert("end", f"{msg}\n")
+        self.comentarista_log.see("end")
+    
+    # ════════════════════════════════════════════════════════════════════════
+    #  TAB PLAYER IA
+    # ════════════════════════════════════════════════════════════════════════
+    def _tab_player_ia(self, parent):
+        tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
+        
+        c = mk(tab, accent=True)
+        c.pack(fill="x", padx=14, pady=(12, 6))
+        lb(c, "🎯  Player IA Gamer", sz=13, bold=True).pack(anchor="w", padx=14, pady=(10, 2))
+        lb(c, "La IA juega automáticamente analizando la pantalla en tiempo real", sz=10, col=MUT).pack(anchor="w", padx=14, pady=(0, 6))
+        
+        opts = mk(c)
+        opts.pack(fill="x", padx=14, pady=(0, 10))
+        
+        grid = ctk.CTkFrame(opts, fg_color="transparent")
+        grid.pack(fill="x", padx=14, pady=(10, 4))
+        grid.grid_columnconfigure((1, 3, 5), weight=1)
+        
+        lb(grid, "Jugador:", sz=11, col=MUT).grid(row=0, column=0, sticky="w", padx=(0, 6))
+        self.player_activo = ctk.CTkComboBox(grid, values=["Player 1", "Player 2", "Ambos"],
+                                              fg_color=CARD, button_color=PURP,
+                                              dropdown_fg_color=CARD2, text_color=TXT,
+                                              border_color=BORD, font=("Segoe UI", 11))
+        self.player_activo.grid(row=0, column=1, sticky="ew")
+        self.player_activo.set(config.get("PLAYER_ACTIVO", "Player 1"))
+        
+        lb(grid, "Modo:", sz=11, col=MUT).grid(row=0, column=2, sticky="w", padx=(12, 6))
+        self.player_modo = ctk.CTkComboBox(grid, values=["basico", "intermedio", "avanzado"],
+                                           fg_color=CARD, button_color=PURP,
+                                           dropdown_fg_color=CARD2, text_color=TXT,
+                                           border_color=BORD, font=("Segoe UI", 11))
+        self.player_modo.grid(row=0, column=3, sticky="ew")
+        self.player_modo.set(config.get("PLAYER_MODO", "basico"))
+        
+        lb(grid, "Tipo:", sz=11, col=MUT).grid(row=0, column=4, sticky="w", padx=(12, 6))
+        self.player_juego = ctk.CTkComboBox(grid, values=["accion", "lucha", "rpg", "plataforma", "hack_slash"],
+                                            fg_color=CARD, button_color=PURP,
+                                            dropdown_fg_color=CARD2, text_color=TXT,
+                                            border_color=BORD, font=("Segoe UI", 11))
+        self.player_juego.grid(row=0, column=5, sticky="ew")
+        self.player_juego.set(config.get("PLAYER_JUEGO", "accion"))
+        
+        # Info: controles
+        info_frame = mk(c)
+        info_frame.pack(fill="x", padx=14, pady=(0, 10))
+        lb(info_frame, "🎮  Controles", sz=11, bold=True, col=PURP).pack(anchor="w", padx=14, pady=(8, 2))
+        lb(info_frame, "Cargados desde config/Keyboard.txt y config/Gamepad.txt", sz=10, col=MUT).pack(anchor="w", padx=14, pady=(0, 4))
+        lb(info_frame, "📁  Keyboard.txt — Teclas para P1 y P2    |    🎮  Gamepad.txt — Mapeo de botones", sz=10, col=GRN_T).pack(anchor="w", padx=14, pady=(2, 8))
+        
+        # Modos
+        info_modos = mk(c)
+        info_modos.pack(fill="x", padx=14, pady=(0, 10))
+        lb(info_modos, "📖  Modos disponibles", sz=11, bold=True, col=PURP).pack(anchor="w", padx=14, pady=(8, 2))
+        for txt in [
+            "• Básico: Movimiento automático + ataque simple",
+            "• Intermedio: IA con decisiones (combatir, loot, explorar)",
+            "• Avanzado: IA con aprendizaje y estrategias",
+        ]:
+            lb(info_modos, txt, sz=10, col=MUT).pack(anchor="w", padx=14, pady=(1, 0))
+        ctk.CTkFrame(info_modos, height=4, fg_color="transparent").pack()
+        
+        # Botones
+        btns = ctk.CTkFrame(c, fg_color="transparent")
+        btns.pack(fill="x", padx=14, pady=(0, 10))
+        btns.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        
+        self.player_btn = ctk.CTkButton(btns, text="▶ Iniciar", fg_color=GRN, text_color=GRN_T,
+            font=("Segoe UI", 12, "bold"), corner_radius=10, height=38,
+            command=self._iniciar_player_ia)
+        self.player_btn.grid(row=0, column=0, padx=(0, 4), sticky="ew")
+        
+        ctk.CTkButton(btns, text="⏹ Detener", fg_color=RED, text_color=RED_T,
+            font=("Segoe UI", 12, "bold"), corner_radius=10, height=38,
+            command=self._detener_player_ia).grid(row=0, column=1, padx=(4, 4), sticky="ew")
+        
+        ctk.CTkButton(btns, text="⏸ Pausar", fg_color=AMB, text_color=AMB_T,
+            font=("Segoe UI", 11), corner_radius=10, height=38,
+            command=self._pausar_player_ia).grid(row=0, column=2, padx=(4, 4), sticky="ew")
+        
+        ctk.CTkButton(btns, text="💾 Guardar", fg_color=BLU, text_color=BLU_T,
+            font=("Segoe UI", 11), corner_radius=10, height=38,
+            command=self._guardar_config_player_ia).grid(row=0, column=3, padx=(4, 0), sticky="ew")
+        
+        # Log
+        c_log_frame = mk(tab)
+        c_log_frame.pack(fill="both", expand=True, padx=14, pady=(8, 12))
+        lb(c_log_frame, "📋  Log del Player IA", sz=10, bold=True, col=MUT).pack(anchor="w", padx=10, pady=(6, 2))
+        self.player_log = ctk.CTkTextbox(c_log_frame, fg_color=LOGBG, text_color=TXT,
+                                         font=("Consolas", 10), height=130)
+        self.player_log.pack(fill="both", expand=True, padx=10, pady=(2, 10))
+        
+        return tab
+    
+    def _build_keyboard_config(self):
+        for widget in self.keys_container.winfo_children():
+            widget.destroy()
+        
+        lb(self.keys_container, "⌨️ Player 1 (Teclado):", sz=11, bold=True).pack(anchor="w", pady=(8, 4))
+        
+        keys_p1 = [
+            ("Derecha:", "KEY_P1_DERECHA", "d"),
+            ("Izquierda:", "KEY_P1_IZQUIERDA", "a"),
+            ("Arriba:", "KEY_P1_ARRIBA", "w"),
+            ("Abajo:", "KEY_P1_ABAJO", "s"),
+            ("Saltar:", "KEY_P1_SALTAR", "space"),
+            ("Atacar:", "KEY_P1_ATACAR", "j"),
+            ("Defender:", "KEY_P1_DEFENDER", "k"),
+            ("Recoger:", "KEY_P1_RECOGER", "e"),
+            ("Correr:", "KEY_P1_CORRER", "shift"),
+            ("Menú:", "KEY_P1_MENU", "tab"),
+            ("Pausa:", "KEY_P1_PAUSA", "esc"),
+            ("Especial:", "KEY_P1_ESPECIAL", "u"),
+        ]
+        
+        self.key_entries_p1 = {}
+        for i, (label, key_name, default) in enumerate(keys_p1):
+            row = ctk.CTkFrame(self.keys_container, fg_color="transparent")
+            row.pack(fill="x", pady=2)
+            lb(row, label, sz=10).pack(side="left", padx=(0, 8))
+            entry = ctk.CTkEntry(row, placeholder_text=default, width=80, fg_color=CARD, text_color=TXT, border_color=BORD)
+            entry.pack(side="left", padx=2)
+            entry.insert(0, config.get(key_name, default))
+            self.key_entries_p1[key_name] = entry
+        
+        lb(self.keys_container, "⌨️ Player 2 (Teclado):", sz=11, bold=True).pack(anchor="w", pady=(12, 4))
+        
+        keys_p2 = [
+            ("Derecha:", "KEY_P2_DERECHA", "right"),
+            ("Izquierda:", "KEY_P2_IZQUIERDA", "left"),
+            ("Arriba:", "KEY_P2_ARRIBA", "up"),
+            ("Abajo:", "KEY_P2_ABAJO", "down"),
+            ("Saltar:", "KEY_P2_SALTAR", "num2"),
+            ("Atacar:", "KEY_P2_ATACAR", "."),
+            ("Defender:", "KEY_P2_DEFENDER", "/"),
+            ("Recoger:", "KEY_P2_RECOGER", "p"),
+            ("Correr:", "KEY_P2_CORRER", "rshift"),
+            ("Menú:", "KEY_P2_MENU", "home"),
+            ("Pausa:", "KEY_P2_PAUSA", "end"),
+            ("Especial:", "KEY_P2_ESPECIAL", "insert"),
+        ]
+        
+        self.key_entries_p2 = {}
+        for i, (label, key_name, default) in enumerate(keys_p2):
+            row = ctk.CTkFrame(self.keys_container, fg_color="transparent")
+            row.pack(fill="x", pady=2)
+            lb(row, label, sz=10).pack(side="left", padx=(0, 8))
+            entry = ctk.CTkEntry(row, placeholder_text=default, width=80, fg_color=CARD, text_color=TXT, border_color=BORD)
+            entry.pack(side="left", padx=2)
+            entry.insert(0, config.get(key_name, default))
+            self.key_entries_p2[key_name] = entry
+    
+    def _build_gamepad_config(self):
+        for widget in self.keys_container.winfo_children():
+            widget.destroy()
+        
+        lb(self.keys_container, "🎮 Configuración Gamepad Detectada", sz=11, bold=True).pack(anchor="w", pady=(8, 4))
+        
+        lb(self.keys_container, "El gamepad se detectará automáticamente al iniciar", sz=10, col=GRN_T).pack(anchor="w", pady=(4, 4))
+        
+        gamepad_info = mk(self.keys_container, fg_color=CARD2)
+        gamepad_info.pack(fill="x", padx=10, pady=(8, 8))
+        
+        lb(gamepad_info, "🎯 Mapeo de botones Gamepad:", sz=11, bold=True).pack(anchor="w", padx=10, pady=(8, 4))
+        lb(gamepad_info, "• Stick Izq. = Movimiento (WASD)", sz=10, col=TXT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(gamepad_info, "• A (botón 0) = Atacar", sz=10, col=TXT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(gamepad_info, "• B (botón 1) = Defender", sz=10, col=TXT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(gamepad_info, "• X (botón 2) = Saltar", sz=10, col=TXT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(gamepad_info, "• Y (botón 3) = Especial", sz=10, col=TXT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(gamepad_info, "• LB (botón 4) = Recoger", sz=10, col=TXT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(gamepad_info, "• RB (botón 5) = Correr", sz=10, col=TXT).pack(anchor="w", padx=10, pady=(2, 0))
+        lb(gamepad_info, "• Start = Menú | Select = Pausa", sz=10, col=TXT).pack(anchor="w", padx=10, pady=(2, 0))
+        
+        lb(gamepad_info, "💡 Consejo: Conecta el gamepad antes de iniciar", sz=10, col=AMB_T).pack(anchor="w", padx=10, pady=(8, 4))
+    
+    def _cambiar_input_type(self, event=None):
+        input_type = self.player_input.get()
+        if input_type == "keyboard":
+            self._build_keyboard_config()
+        else:
+            self._build_gamepad_config()
+    
+    def _guardar_config_player_ia(self):
+        from src.core.config import load_config, save_config
+        cfg = load_config()
+        cfg["PLAYER_ACTIVO"] = self.player_activo.get()
+        cfg["PLAYER_MODO"] = self.player_modo.get()
+        cfg["PLAYER_INPUT"] = self.player_input.get()
+        cfg["PLAYER_JUEGO"] = self.player_juego.get()
+        
+        if hasattr(self, 'key_entries_p1') and self.player_input.get() == "keyboard":
+            for key_name, entry in self.key_entries_p1.items():
+                cfg[key_name] = entry.get().strip().lower()
+            for key_name, entry in self.key_entries_p2.items():
+                cfg[key_name] = entry.get().strip().lower()
+        
+        save_config(cfg)
+        for k, v in cfg.items():
+            config[k] = v
+        self.log("✅ Configuración del Player IA guardada")
+    
+    def _log_player_ia(self, msg):
+        self.player_log.insert("end", f"{msg}\n")
+        self.player_log.see("end")
+    
     # ════════════════════════════════════════════════════════════════════════
     #  TAB API_KEY
     # ════════════════════════════════════════════════════════════════════════
     def _tab_api_key(self, parent):
         tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
-        c = mk(tab)
+        
+        c = mk(tab, accent=True)
         c.pack(fill="x", padx=14, pady=(12, 6))
-        lb(c, "🔑  API Keys", sz=13, bold=True).pack(anchor="w", padx=10, pady=(12, 4))
-
-        # === GROQ - Traductor, Vision, Comentarista ===
-        groq_frame = mk(c, fg_color=CARD2)
-        groq_frame.pack(fill="x", padx=10, pady=(0, 8))
-        lb(groq_frame, "🔵 Groq — Traductor, Vision, Comentarista", sz=12, col=TXT, bold=True).pack(anchor="w", padx=10, pady=(10, 4))
-
-        self.groq_key_entry = ctk.CTkEntry(groq_frame, placeholder_text="gsk_...",
-                                          font=("Consolas", 12), show="*",
-                                          fg_color=CARD, text_color=TXT, border_color=BORD)
-        self.groq_key_entry.pack(fill="x", padx=10, pady=(0, 6))
-        groq_val = config.get("GROQ_API_KEY", "")
-        if groq_val:
-            self.groq_key_entry.insert(0, groq_val)
-
-        btn_g = ctk.CTkFrame(groq_frame, fg_color="transparent")
-        btn_g.pack(fill="x", padx=10, pady=(0, 8))
-        btn_g.grid_columnconfigure((0, 1, 2), weight=1)
-        ctk.CTkButton(btn_g, text="👁", fg_color=CARD, text_color=TXT,
-                      command=lambda: self._toggle_key(self.groq_key_entry),
-                      height=30, corner_radius=6, width=40).grid(row=0, column=0, padx=(0, 4))
-        ctk.CTkButton(btn_g, text="💾 Guardar", fg_color=GRN, text_color=GRN_T,
-                      command=lambda: self._guardar_groq(),
-                      height=30, corner_radius=6, hover_color="#22c55e").grid(row=0, column=1, padx=2)
-        ctk.CTkButton(btn_g, text="🧪 Test", fg_color=PURP, text_color="#e9d5ff",
-                      command=lambda: self._test_api("groq", self.groq_key_entry.get()),
-                      height=30, corner_radius=6).grid(row=0, column=2, padx=(4, 0))
-
-        link_g = lb(groq_frame, "🌐 https://console.groq.com/keys", sz=10, col="#93c5fd", cursor="hand2")
-        link_g.pack(anchor="w", padx=10, pady=(0, 6))
-        link_g.bind("<Button-1>", lambda e: webbrowser.open("https://console.groq.com/keys"))
-
-        groq_status = config.get("GROQ_API_KEY", "")
-        if groq_status and len(groq_status) > 5:
-            lb(groq_frame, f"✅ Guardada (****{groq_status[-6:]})", sz=10, col=GRN_T).pack(anchor="w", padx=10, pady=(0, 8))
-        else:
-            lb(groq_frame, "❌ No configurada", sz=10, col=RED_T).pack(anchor="w", padx=10, pady=(0, 8))
-
-        # === CEREBRAS - Chat Bot ===
-        cb_frame = mk(c, fg_color=CARD2)
-        cb_frame.pack(fill="x", padx=10, pady=(0, 8))
-        lb(cb_frame, "🟡 Cerebras — Chat Bot, PTT, Twitch", sz=12, col=TXT, bold=True).pack(anchor="w", padx=10, pady=(10, 4))
-
-        self.cere_key_entry = ctk.CTkEntry(cb_frame, placeholder_text="csk_...",
-                                           font=("Consolas", 12), show="*",
-                                           fg_color=CARD, text_color=TXT, border_color=BORD)
-        self.cere_key_entry.pack(fill="x", padx=10, pady=(0, 6))
-        cere_val = config.get("CEREBRAS_API_KEY", "")
-        if cere_val:
-            self.cere_key_entry.insert(0, cere_val)
-
-        btn_c = ctk.CTkFrame(cb_frame, fg_color="transparent")
-        btn_c.pack(fill="x", padx=10, pady=(0, 8))
-        btn_c.grid_columnconfigure((0, 1, 2), weight=1)
-        ctk.CTkButton(btn_c, text="👁", fg_color=CARD, text_color=TXT,
-                      command=lambda: self._toggle_key(self.cere_key_entry),
-                      height=30, corner_radius=6, width=40).grid(row=0, column=0, padx=(0, 4))
-        ctk.CTkButton(btn_c, text="💾 Guardar", fg_color=GRN, text_color=GRN_T,
-                      command=lambda: self._guardar_cere(),
-                      height=30, corner_radius=6, hover_color="#22c55e").grid(row=0, column=1, padx=2)
-        ctk.CTkButton(btn_c, text="🧪 Test", fg_color=PURP, text_color="#e9d5ff",
-                      command=lambda: self._test_api("cerebras", self.cere_key_entry.get()),
-                      height=30, corner_radius=6).grid(row=0, column=2, padx=(4, 0))
-
-        link_c = lb(cb_frame, "🌐 https://cloud.cerebras.ai", sz=10, col="#93c5fd", cursor="hand2")
-        link_c.pack(anchor="w", padx=10, pady=(0, 6))
-        link_c.bind("<Button-1>", lambda e: webbrowser.open("https://cloud.cerebras.ai"))
-
-        cere_status = config.get("CEREBRAS_API_KEY", "")
-        if cere_status and len(cere_status) > 5:
-            lb(cb_frame, f"✅ Guardada (****{cere_status[-6:]})", sz=10, col=GRN_T).pack(anchor="w", padx=10, pady=(0, 8))
-        else:
-            lb(cb_frame, "❌ No configurada", sz=10, col=RED_T).pack(anchor="w", padx=10, pady=(0, 8))
-
-        # === GOOGLE AI ===
-        google_frame = mk(c, fg_color=CARD2)
-        google_frame.pack(fill="x", padx=10, pady=(0, 8))
-        lb(google_frame, "🔴 Google AI Studio", sz=12, col=TXT, bold=True).pack(anchor="w", padx=10, pady=(10, 4))
-
-        self.google_key_entry = ctk.CTkEntry(google_frame, placeholder_text="AIza...",
-                                             font=("Consolas", 12), show="*",
-                                             fg_color=CARD, text_color=TXT, border_color=BORD)
-        self.google_key_entry.pack(fill="x", padx=10, pady=(0, 6))
-        google_val = config.get("GOOGLE_API_KEY", "")
-        if google_val:
-            self.google_key_entry.insert(0, google_val)
-
-        btn_goog = ctk.CTkFrame(google_frame, fg_color="transparent")
-        btn_goog.pack(fill="x", padx=10, pady=(0, 8))
-        btn_goog.grid_columnconfigure((0, 1, 2), weight=1)
-        ctk.CTkButton(btn_goog, text="👁", fg_color=CARD, text_color=TXT,
-                      command=lambda: self._toggle_key(self.google_key_entry),
-                      height=30, corner_radius=6, width=40).grid(row=0, column=0, padx=(0, 4))
-        ctk.CTkButton(btn_goog, text="💾 Guardar", fg_color=GRN, text_color=GRN_T,
-                      command=lambda: self._guardar_google(),
-                      height=30, corner_radius=6, hover_color="#22c55e").grid(row=0, column=1, padx=2)
-        ctk.CTkButton(btn_goog, text="🧪 Test", fg_color=PURP, text_color="#e9d5ff",
-                      command=lambda: self._test_api("google", self.google_key_entry.get()),
-                      height=30, corner_radius=6).grid(row=0, column=2, padx=(4, 0))
-
-        link_goog = lb(google_frame, "🌐 https://aistudio.google.com/apikey", sz=10, col="#93c5fd", cursor="hand2")
-        link_goog.pack(anchor="w", padx=10, pady=(0, 6))
-        link_goog.bind("<Button-1>", lambda e: webbrowser.open("https://aistudio.google.com/apikey"))
-
-        google_status = config.get("GOOGLE_API_KEY", "")
-        if google_status and len(google_status) > 5:
-            lb(google_frame, f"✅ Guardada (****{google_status[-6:]})", sz=10, col=GRN_T).pack(anchor="w", padx=10, pady=(0, 8))
-        else:
-            lb(google_frame, "❌ No configurada", sz=10, col=RED_T).pack(anchor="w", padx=10, pady=(0, 8))
-
+        lb(c, "🔑  API Keys", sz=13, bold=True).pack(anchor="w", padx=14, pady=(10, 2))
+        lb(c, "Configura las claves de los proveedores de IA", sz=10, col=MUT).pack(anchor="w", padx=14, pady=(0, 6))
+        
+        for provider, icon, title, usage, entry_attr, placeholder_key, cfg_key, link_url, test_fn, guardar_fn in [
+            ("cerebras", "🟡", "Cerebras", "Chat Bot, PTT, Twitch",
+             "cere_key_entry", "csk_...", "CEREBRAS_API_KEY",
+             "https://cloud.cerebras.ai", "cerebras", "_guardar_cere"),
+            ("groq", "🔵", "Groq", "Comentarista (Vision IA)",
+             "groq_key_entry", "gsk_...", "GROQ_API_KEY",
+             "https://console.groq.com", "groq", "_guardar_groq"),
+        ]:
+            card = mk(c)
+            card.pack(fill="x", padx=14, pady=(0, 8))
+            lb(card, f"{icon}  {title} — {usage}", sz=12, bold=True, col=TXT).pack(anchor="w", padx=14, pady=(10, 4))
+            
+            # Entry
+            entry = ctk.CTkEntry(card, placeholder_text=placeholder_key,
+                                font=("Consolas", 12), show="*",
+                                fg_color=CARD, text_color=TXT, border_color=BORD)
+            entry.pack(fill="x", padx=14, pady=(0, 4))
+            val = config.get(cfg_key, "")
+            if val:
+                entry.insert(0, val)
+            setattr(self, entry_attr, entry)
+            
+            # Botones
+            bf = ctk.CTkFrame(card, fg_color="transparent")
+            bf.pack(fill="x", padx=14, pady=(4, 4))
+            bf.grid_columnconfigure((0, 1, 2), weight=1)
+            ctk.CTkButton(bf, text="👁", fg_color=CARD2, text_color=TXT,
+                          command=lambda e=entry: self._toggle_key(e),
+                          height=30, corner_radius=8, width=40).grid(row=0, column=0, padx=(0, 4))
+            ctk.CTkButton(bf, text="💾 Guardar", fg_color=GRN, text_color=GRN_T,
+                          command=getattr(self, guardar_fn),
+                          height=30, corner_radius=8, hover_color="#10b981").grid(row=0, column=1, padx=2)
+            ctk.CTkButton(bf, text="🧪 Test", fg_color=PURP, text_color="#f3e8ff",
+                          command=lambda p=test_fn, e=entry: self._test_api(p, e.get()),
+                          height=30, corner_radius=8).grid(row=0, column=2, padx=(4, 0))
+            
+            # Link
+            link = lb(card, f"🌐  {link_url}", sz=10, col="#818cf8", cursor="hand2")
+            link.pack(anchor="w", padx=14, pady=(2, 4))
+            link.bind("<Button-1>", lambda e, u=link_url: webbrowser.open(u))
+            
+            # Status
+            status = config.get(cfg_key, "")
+            if status and len(status) > 5:
+                lb(card, f"✅ Guardada (****{status[-6:]})", sz=10, col=GRN_T).pack(anchor="w", padx=14, pady=(0, 8))
+            else:
+                lb(card, "❌ No configurada", sz=10, col=RED_T).pack(anchor="w", padx=14, pady=(0, 8))
+        
         return tab
-
+    
     def _toggle_key(self, entry):
         current = entry.cget("show")
         entry.configure(show="" if current == "*" else "*")
-
+    
+    def _guardar_cere(self):
+        value = self.cere_key_entry.get().strip()
+        if not value:
+            self.log("❌  Ingresa una API Key válida")
+            return
+        if not (value.startswith("csk-") or value.startswith("csk_")):
+            self.log("❌  Cerebras API Key debe empezar con 'csk-'")
+            return
+        from src.core.config import load_config, save_config
+        cfg = load_config()
+        cfg["CEREBRAS_API_KEY"] = value
+        save_config(cfg)
+        config["CEREBRAS_API_KEY"] = value
+        self.log(f"✅  CEREBRAS_API_KEY guardada correctamente")
+    
     def _guardar_groq(self):
         value = self.groq_key_entry.get().strip()
         if not value:
@@ -975,7 +1162,21 @@ class App(ctk.CTk):
         save_config(cfg)
         config["GROQ_API_KEY"] = value
         self.log(f"✅  GROQ_API_KEY guardada correctamente")
-
+    
+    def _guardar_eq(self):
+        from src.core.config import load_config, save_config
+        cfg = load_config()
+        cfg["EQ_BASS"] = self.bass_var.get()
+        cfg["EQ_TREBLE"] = self.treble_var.get()
+        cfg["EQ_SPEED"] = self.speed_var.get()
+        cfg["EQ_AUTOTUNE"] = self.autotune_var.get()
+        save_config(cfg)
+        config["EQ_BASS"] = self.bass_var.get()
+        config["EQ_TREBLE"] = self.treble_var.get()
+        config["EQ_SPEED"] = self.speed_var.get()
+        config["EQ_AUTOTUNE"] = self.autotune_var.get()
+        self.log(f"✅  EQ: Graves={self.bass_var.get()}, Agudos={self.treble_var.get()}, Vel={self.speed_var.get()}%, Auto-Tune={self.autotune_var.get()}%")
+    
     def _guardar_bot_cmds(self):
         cmd = self.cmd_speak_entry.get().strip()
         cmd_map = self.cmd_speakmap_entry.get().strip()
@@ -999,14 +1200,12 @@ class App(ctk.CTk):
         config["BOT_VOICE_MALE"] = voice_male
         config["BOT_VOICE_FEMALE"] = voice_female
         self.log(f"✅  Guardado: {cmd} ({voice_male}), {cmd_map} ({voice_female})")
-
+    
     def _test_bot_speaker(self):
         """Test the selected Bot Speaker voices"""
         voice_male_display = self.voice_male_var.get()
         voice_female_display = self.voice_female_var.get()
         
-        voice_male_display = self.voice_male_var.get()
-        voice_female_display = self.voice_female_var.get()
         voice_male_edge = voice_male_display.replace("_", "-")
         voice_female_edge = voice_female_display.replace("_", "-")
         
@@ -1020,438 +1219,38 @@ class App(ctk.CTk):
         
         self.log("Probando voz femenina...")
         speak("Hola, esta es una prueba de voz femenina", voice_female_edge, device_id)
-
-    def _test_ia_voice(self):
-        """Test the selected IA voice"""
-        voice = self.ia_voice_var.get()
-        command = self.ia_command_entry.get().strip() or "!IA"
-        if not voice:
-            self.log("Selecciona una voz para probar")
+    
+    def _seleccionar_audio(self, idx, path_var):
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(title=f"Seleccionar audio #{idx}",
+                                          filetypes=[("Audio", "*.mp3 *.wav *.ogg")])
+        if path:
+            path_var.set(path)
+            self.log(f"🔊 Audio #{idx}: {path}")
+    
+    def _reprobar_audio(self, path):
+        if not path:
+            self.log("⚠  No hay archivo seleccionado")
             return
-        
-        voice_edge = voice.replace("_", "-")
-        
-        self.log(f"Probando voz IA: {voice}")
-        test_text = "Hola, esta es una prueba de la voz del Bot Chat IA"
-        _, device_id = self.get_devices()
-        speak(test_text, voice_edge, device_id)
-
-    def _guardar_voice_default(self):
-        voice = self.voice_default_var.get()
+        from src.audio import play_file
+        _, dev = self.get_devices()
+        if isinstance(dev, list):
+            dev = dev[0]
+        self.log(f"🔊 Reproduciendo: {path}")
+        import threading
+        threading.Thread(target=play_file, args=(path, dev), daemon=True).start()
+    
+    def _guardar_audio_slots(self):
         from src.core.config import load_config, save_config
         cfg = load_config()
-        cfg["BOT_VOICE_DEFAULT"] = voice
+        for i, path_var, cmd_var in self._audio_slots:
+            cfg[f"AUDIO_FILE_{i}"] = path_var.get()
+            cfg[f"AUDIO_CMD_{i}"] = cmd_var.get()
         save_config(cfg)
-        config["BOT_VOICE_DEFAULT"] = voice
-        self.log(f"✅  Voz por defecto: {voice}")
-
-    def _guardar_ia_config(self):
-        command = self.ia_command_entry.get().strip()
-        voice = self.ia_voice_var.get()
-        if not command:
-            self.log("❌  Ingresa el comando IA")
-            return
-        if not command.startswith("!"):
-            self.log("❌  El comando IA debe comenzar con '!'")
-            return
-        from src.core.config import load_config, save_config
-        cfg = load_config()
-        cfg["BOT_IA_COMMAND"] = command
-        cfg["BOT_IA_VOICE"] = voice
-        cfg["COMENTARISTA_LEER_CHAT"] = self.comentarista_leer_chat.get()
-        save_config(cfg)
-        config["BOT_IA_COMMAND"] = command
-        config["BOT_IA_VOICE"] = voice
-        config["COMENTARISTA_LEER_CHAT"] = self.comentarista_leer_chat.get()
-        self._ia_command = command
-        self._ia_voice = voice
-        chat_str = "ON" if self.comentarista_leer_chat.get() else "OFF"
-        self.log(f"✅  Guardado IA: {command} ({voice}) | Chat Twitch: {chat_str}")
-
-    def _guardar_eq(self):
-        from src.core.config import load_config, save_config
-        cfg = load_config()
-        cfg["EQ_BASS"] = self.bass_var.get()
-        cfg["EQ_TREBLE"] = self.treble_var.get()
-        cfg["EQ_SPEED"] = self.speed_var.get()
-        cfg["EQ_AUTOTUNE"] = self.autotune_var.get()
-        save_config(cfg)
-        config["EQ_BASS"] = self.bass_var.get()
-        config["EQ_TREBLE"] = self.treble_var.get()
-        config["EQ_SPEED"] = self.speed_var.get()
-        config["EQ_AUTOTUNE"] = self.autotune_var.get()
-        self.log(f"✅  EQ: Graves={self.bass_var.get()}, Agudos={self.treble_var.get()}, Vel={self.speed_var.get()}%, Auto-Tune={self.autotune_var.get()}%")
-
-    def _guardar_cere(self):
-        value = self.cere_key_entry.get().strip()
-        if not value:
-            self.log("❌  Ingresa una API Key válida")
-            return
-        if not (value.startswith("csk-") or value.startswith("csk_")):
-            self.log("❌  Cerebras API Key debe empezar con 'csk-'")
-            return
-        from src.core.config import load_config, save_config
-        cfg = load_config()
-        cfg["CEREBRAS_API_KEY"] = value
-        save_config(cfg)
-        config["CEREBRAS_API_KEY"] = value
-        self.log(f"✅  CEREBRAS_API_KEY guardada correctamente")
-
-    def _guardar_google(self):
-        value = self.google_key_entry.get().strip()
-        if not value:
-            self.log("❌  Ingresa una API Key válida")
-            return
-        if not value.startswith("AIza"):
-            self.log("❌  Google API Key debe empezar con 'AIza'")
-            return
-        from src.core.config import load_config, save_config
-        cfg = load_config()
-        cfg["GOOGLE_API_KEY"] = value
-        save_config(cfg)
-        config["GOOGLE_API_KEY"] = value
-        self.log(f"GOOGLE_API_KEY guardada correctamente")
-
-    def _test_api(self, provider, api_key):
-        if not api_key:
-            self.log(f"Primero guarda la API Key")
-            return
-        self.log(f"Probando {provider}...")
-        threading.Thread(target=self._test_api_thread, args=(provider, api_key), daemon=True).start()
-
-    def _test_api_thread(self, provider, api_key):
-        try:
-            if provider == "groq":
-                r = requests.post("https://api.groq.com/openai/v1/chat/completions",
-                                  headers={"Authorization": f"Bearer {api_key}"},
-                                  json={"model": "llama-3.1-8b-instant",
-                                        "messages": [{"role": "user", "content": "hola"}],
-                                        "max_tokens": 10}, timeout=10)
-            elif provider == "cerebras":
-                r = requests.post("https://api.cerebras.ai/v1/chat/completions",
-                                   headers={"Authorization": f"Bearer {api_key}"},
-                                   json={"model": "llama3.1-8b",
-                                         "messages": [{"role": "user", "content": "hola"}],
-                                         "max_tokens": 10}, timeout=10)
-            elif provider == "google":
-                if not api_key.startswith("AIza"):
-                    self.log("❌  Google API Key debe empezar con 'AIza'")
-                    return
-                self.log(f"✅  Google API Key válida (****{api_key[-6:]})")
-                return
-            if r.status_code == 200:
-                self.log(f"✅  {provider} funcionando correctamente")
-            else:
-                self.log(f"❌  {provider} error: {r.status_code}")
-        except Exception as e:
-            self.log(f"❌  {provider} error: {e}")
-
-    def _tab_game_ia(self, parent):
-        tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
-        c = mk(tab)
-        c.pack(fill="x", padx=14, pady=(12, 6))
-        
-        # Título
-        lb(c, "🎮 Game IA", sz=16, bold=True, col="#ff69b4").pack(anchor="w", padx=10, pady=(10, 4))
-        lb(c, "IA que juega automáticamente en juegos", sz=11, col=MUT).pack(anchor="w", padx=10, pady=(0, 6))
-        
-        # Modo de jugador
-        mode_frame = mk(tab, fg_color=CARD2)
-        mode_frame.pack(fill="x", padx=14, pady=(0, 8))
-        lb(mode_frame, "👤 Modo de Jugador:", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
-        
-        self.game_player_mode = ctk.StringVar(value="player1")
-        
-        ctk.CTkRadioButton(mode_frame, text="Player 1 (Yo)", variable=self.game_player_mode, 
-                          value="player1", fg_color=GRN, text_color=TXT).pack(anchor="w", padx=10, pady=(2, 0))
-        ctk.CTkRadioButton(mode_frame, text="Player 2 (Contrario)", variable=self.game_player_mode,
-                          value="player2", fg_color=RED, text_color=TXT).pack(anchor="w", padx=10, pady=(2, 0))
-        
-        # Captura de pantalla
-        capture_frame = mk(tab, fg_color=CARD2)
-        capture_frame.pack(fill="x", padx=14, pady=(0, 8))
-        lb(capture_frame, "📷 Captura de Pantalla", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
-        
-        btn_capture = ctk.CTkButton(capture_frame, text="📸 Capturar Pantalla", fg_color=CARD, text_color=TXT,
-                                    height=32, corner_radius=8, command=self._capture_screen)
-        btn_capture.pack(fill="x", padx=10, pady=(4, 4))
-        
-        # Controles
-        control_frame = mk(tab, fg_color=CARD2)
-        control_frame.pack(fill="x", padx=14, pady=(0, 8))
-        lb(control_frame, "🎯 Controles", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
-        
-        btn_start = ctk.CTkButton(control_frame, text="▶ Iniciar Game IA", fg_color=GRN, text_color=GRN_T,
-                                   height=36, corner_radius=8, hover_color="#22c55e", command=self._start_game_ia)
-        btn_start.pack(fill="x", padx=10, pady=(4, 4))
-        
-        btn_stop = ctk.CTkButton(control_frame, text="⏹ Detener Game IA", fg_color=RED, text_color="#fff",
-                               height=36, corner_radius=8, hover_color="#dc2626", command=self._stop_game_ia)
-        btn_stop.pack(fill="x", padx=10, pady=(4, 4))
-        
-        # Estado
-        status_frame = mk(tab, fg_color=CARD2)
-        status_frame.pack(fill="x", padx=14, pady=(0, 8))
-        lb(status_frame, "📊 Estado:", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
-        self.game_status_lbl = lb(status_frame, "⏸ Detenido", sz=11, col=RED_T)
-        self.game_status_lbl.pack(anchor="w", padx=10, pady=(0, 4))
-        
-        # Tips
-        tips_frame = mk(tab, fg_color=CARD2)
-        tips_frame.pack(fill="x", padx=14, pady=(0, 8))
-        lb(tips_frame, "💡 Tips:", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
-        lb(tips_frame, "  1. Abre el juego en tu PC", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        lb(tips_frame, "  2. Selecciona Player 1 o Player 2", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        lb(tips_frame, "  3. Presiona 'Capturar' para ver pantalla", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        lb(tips_frame, "  4. Presiona 'Iniciar' para que IA juegue", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        
-        return tab
-
-    def _capture_screen(self):
-        """Mostrar análisis de pantalla del servicio de visión"""
-        try:
-            analysis = vision_service.get_analysis()
-            text = analysis.get("text", "")
-            desc = analysis.get("description", "")
-            game_state = analysis.get("game_state", "")
-            objects = analysis.get("objects", [])
-            
-            result = f"📊 Análisis de pantalla:\n"
-            if text.strip():
-                result += f"📝 Texto: {text[:100]}{'...' if len(text) > 100 else ''}\n"
-            if desc.strip():
-                result += f"👁 Descripción: {desc[:100]}{'...' if len(desc) > 100 else ''}\n"
-            if game_state.strip():
-                result += f"🎮 Estado juego: {game_state}\n"
-            if objects:
-                result += f"🎯 Objetos: {', '.join(objects[:5])}{'...' if len(objects) > 5 else ''}\n"
-            
-            self.log(result if result.strip() != "📊 Análisis de pantalla:" else "⏳ Esperando análisis inicial...")
-        except Exception as e:
-            self.log(f"❌ Error en análisis: {e}")
-
-    def _start_game_ia(self):
-        """Iniciar IA usando servicio de visión"""
-        try:
-            # Forzar un análisis inmediato para tener datos iniciales
-            vision_service._analyze_screen()
-            
-            mode = self.game_player_mode.get()
-            self.game_status_lbl.configure(text=f"▶ Jugando como {mode}", col=GRN_T)
-            self.log(f"🎮 Game IA iniciado: {mode}")
-            
-            # Hilo para jugar usando visión
-            def game_loop():
-                import time
-                last_analysis_time = 0
-                while hasattr(self, '_game_ia_running') and self._game_ia_running:
-                    try:
-                        # Actualizar análisis cada 2 segundos para reducir carga
-                        current_time = time.time()
-                        if current_time - last_analysis_time >= 2.0:
-                            vision_service._analyze_screen()
-                            last_analysis_time = current_time
-                        
-                        # Obtener estado del juego del servicio de visión
-                        analysis = vision_service.get_analysis()
-                        game_state = analysis.get("game_state", "")
-                        
-                        # En modo simple, hacer click basado en análisis básico
-                        # En una implementación más avanzada, esto usaría el game_state para decisiones inteligentes
-                        if game_state and "click" in game_state.lower():
-                            # Simular un click en el centro si detectamos que hay algo para hacer click
-                            import pyautogui
-                            screen_width, screen_height = pyautogui.size()
-                            x, y = screen_width // 2, screen_height // 2
-                            pyautogui.click(x, y)
-                            self.wlog(f"🖱 Click vision en ({x}, {y}) basado en estado: {game_state[:50]}")
-                        elif not game_state or len(game_state.strip()) < 10:
-                            # Si no hay estado claro, hacer click aleatorio suave para testing
-                            import random
-                            import pyautogui
-                            screen_width, screen_height = pyautogui.size()
-                            x = random.randint(screen_width//4, 3*screen_width//4)
-                            y = random.randint(screen_height//4, 3*screen_height//4)
-                            pyautogui.click(x, y)
-                            self.wlog(f"🖱 Click aleatorio en ({x}, {y}) - esperando análisis...")
-                        
-                        time.sleep(1.5)  # Menos frecuente para reducir CPU
-                    except Exception as e:
-                        self.wlog(f"❌ Error en bucle de juego: {e}")
-                        time.sleep(2)
-            
-            self._game_ia_running = True
-            threading.Thread(target=game_loop, daemon=True).start()
-        except Exception as e:
-            self.log(f"❌ Error: {e}")
-
-    def _stop_game_ia(self):
-        """Detener IA"""
-        try:
-            self._game_ia_running = False
-            self.game_status_lbl.configure(text="⏸ Detenido", col=RED_T)
-            self.log("⏹ Game IA detenido")
-        except Exception as e:
-            self.log(f"❌ Error: {e}")
-
-    def _tab_creditos(self, parent):
-        tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
-        c = mk(tab)
-        c.pack(fill="x", padx=14, pady=(12, 6))
-        
-        # Título con versión
-        lb(c, f"📋 {APP_NAME}", sz=18, bold=True, col="#ff69b4").pack(anchor="w", padx=10, pady=(10, 4))
-        lb(c, f"Versión {APP_VERSION}", sz=12, col=MUT).pack(anchor="w", padx=10, pady=(0, 10))
-        
-        # Descripción
-        desc_frame = mk(tab, fg_color=CARD2)
-        desc_frame.pack(fill="x", padx=14, pady=(0, 8))
-        lb(desc_frame, "🎤 Asistente VTuber con IA", sz=13, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
-        lb(desc_frame, "Bot de Twitch con Chat IA, traductor en tiempo real, voz PTT y más.", sz=11, col=MUT).pack(anchor="w", padx=10, pady=(0, 4))
-        
-        # Características
-        feat_frame = mk(tab, fg_color=CARD2)
-        feat_frame.pack(fill="x", padx=14, pady=(0, 8))
-        lb(feat_frame, "✨ Características", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
-        features = [
-            "🤖 Chat IA con Cerebras/Groq",
-            "🔊 Voces Edge TTS neurales",
-            "🎛 Equalizador de voz (graves, agudos, velocidad, auto-tune)",
-            "😀 Detección de emociones",
-            "🌍 Traductor en tiempo real",
-            "🎤 Voz PTT con Vosk",
-            "📺 Monitor de juego",
-            "🎮 Game watcher",
-        ]
-        for f in features:
-            lb(feat_frame, f"  • {f}", sz=11, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        
-        # Créditos
-        cred_frame = mk(tab, fg_color=CARD2)
-        cred_frame.pack(fill="x", padx=14, pady=(0, 8))
-        lb(cred_frame, "📌 Créditos", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
-        lb(cred_frame, "  Desarrollado por Manuel0084", sz=11, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        lb(cred_frame, "  GitHub: github.com/manuel00084", sz=11, col="#93c5fd", cursor="hand2").pack(anchor="w", padx=10, pady=(2, 0))
-        
-        # Aviso legal
-        legal_frame = mk(tab, fg_color=CARD2)
-        legal_frame.pack(fill="x", padx=14, pady=(0, 8))
-        lb(legal_frame, "⚖️ Licencia", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
-        
-        lb(legal_frame, "  Licensed under the Apache License, Version 2.0", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        apache_link = lb(legal_frame, "  http://www.apache.org/licenses/LICENSE-2.0", sz=10, col="#93c5fd", cursor="hand2")
-        apache_link.pack(anchor="w", padx=10, pady=(2, 0))
-        apache_link.bind("<Button-1>", lambda e: webbrowser.open("http://www.apache.org/licenses/LICENSE-2.0"))
-        
-        lb(legal_frame, "", sz=10).pack(anchor="w", padx=10, pady=(4, 0))
-        lb(legal_frame, "  Copyright 2024 Manuel0084", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        
-        # Términos legales completos
-        terms_frame = mk(tab, fg_color=CARD2)
-        terms_frame.pack(fill="both", expand=True, padx=14, pady=(0, 8))
-        lb(terms_frame, "📜 Términos Legales", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
-        
-        terms_text = """Apache License
-Version 2.0, January 2004
-http://www.apache.org/licenses/
-
-TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-
-1. Definitions.
-"License" shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
-"Licensor" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
-"You" (or "Your") shall mean an individual or Legal Entity exercising permissions granted by this License.
-"Work" shall mean the work of authorship, whether in Source or Object form, made available under the License.
-"Derivative Works" shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work.
-
-2. Grant of Copyright License.
-Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work.
-
-3. Grant of Patent License.
-Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable patent license.
-
-4. Redistribution.
-You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, provided that You meet the following conditions:
-(a) You must give any other recipients of the Work or Derivative Works a copy of this License; and
-(b) You must cause any modified files to carry prominent notices stating that You changed the files.
-
-5. Submission of Contributions.
-Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License.
-
-6. Trademarks.
-This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor.
-
-7. Disclaimer of Warranty.
-Unless required by applicable law or agreed to in writing, Licensor provides the Work on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND.
-
-8. Limitation of Liability.
-In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, shall any Contributor be liable to You for damages.
-
-9. Accepting Warranty or Additional Liability.
-While redistributing the Work, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations.
-
-END OF TERMS AND CONDITIONS"""
-        
-        terms_box = ctk.CTkTextbox(terms_frame, fg_color=BG, text_color=TXT, font=("Consolas", 9))
-        terms_box.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        terms_box.insert("1.0", terms_text)
-        terms_box.configure(state="disabled")
-        
-        # Third Party Licenses
-        third_party_frame = mk(tab, fg_color=CARD2)
-        third_party_frame.pack(fill="x", padx=14, pady=(0, 8))
-        lb(third_party_frame, "📦 Third Party Licenses", sz=12, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(10, 4))
-        
-        lb(third_party_frame, "Este proyecto utiliza software y modelos de terceros.", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        lb(third_party_frame, "", sz=10).pack(anchor="w", padx=10, pady=(2, 0))
-        
-        lb(third_party_frame, "Vosk", sz=11, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(2, 0))
-        lb(third_party_frame, "  Proyecto: https://alphacephei.com/vosk/", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        lb(third_party_frame, "  Licencia: Apache 2.0", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        
-        lb(third_party_frame, "", sz=10).pack(anchor="w", padx=10, pady=(2, 0))
-        lb(third_party_frame, "Otros componentes", sz=11, bold=True, col=TXT).pack(anchor="w", padx=10, pady=(2, 0))
-        lb(third_party_frame, "  Cada librería y modelo mantiene su licencia original.", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        
-        lb(third_party_frame, "  Edge TTS - Microsoft", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        lb(third_party_frame, "  CustomTkinter - MIT", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        lb(third_party_frame, "  TwitchIO - MIT", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        lb(third_party_frame, "  Groq/Cerebras API - Proprietary", sz=10, col=MUT).pack(anchor="w", padx=10, pady=(2, 0))
-        
-        return tab
-
-    # ═════════════════════════════��══════════════════════════════════════════
-    #  LÓGICA
-    # ════════════════════════════════════════════════════════════════════════
-    def log(self, text):
-        self.log_box.insert("end", text + "\n")
-        self.log_box.see("end")
-
-    def wlog(self, text):
-        self.log(text)
-
-    def get_devices(self):
-        sn = self.sp2.get()
-        an = self.ia2.get()
-        mn = self.mn2.get()
-        sid = next((i for n, i in self.devices if n == sn), 0)
-        iid = next((i for n, i in self.devices if n == an), 0)
-        if mn in ("(Ninguno)", ""):
-            return sid, iid
-        mid = next((i for n, i in self.devices if n == mn), None)
-        return sid, ([iid, mid] if mid and mid != iid else iid)
-
-    def change_mode(self, filename):
-        # Guardar el prompt seleccionado en config.txt
-        from src.core.config import load_config, save_config
-        cfg = load_config()
-        cfg["SELECTED_PROMPT"] = filename
-        save_config(cfg)
-        config["SELECTED_PROMPT"] = filename
-        # Cargar el nuevo prompt
-        with open(os.path.join(self.prompt_folder, filename), encoding="utf-8") as f:
-            self.current_prompt = f.read()
-        self.log(f"Personalidad cambiada a: {filename}")
+        for i, path_var, cmd_var in self._audio_slots:
+            config[f"AUDIO_FILE_{i}"] = path_var.get()
+            config[f"AUDIO_CMD_{i}"] = cmd_var.get()
+        self.log("✅  Sonidos guardados")
     
     def _crear_nuevo_prompt(self):
         # Pedir nombre para el nuevo prompt
@@ -1459,63 +1258,38 @@ END OF TERMS AND CONDITIONS"""
                                     text="Ingresa el nombre para la nueva personalidad:")
         nombre = dialog.get_input()
         if nombre:
-            # Validar nombre de archivo
             nombre = nombre.strip()
             if not nombre.endswith(".txt"):
                 nombre += ".txt"
             
-            # Verificar que no exista
             if nombre in self.prompt_files:
                 self.log(f"Ya existe una personalidad con ese nombre")
                 return
             
-            # Crear el archivo con contenido por defecto
             try:
                 ruta = os.path.join(self.prompt_folder, nombre)
                 with open(ruta, "w", encoding="utf-8") as f:
                     f.write("Eres una VTuber divertida y amigable.")
                 
-                # Actualizar la lista de prompts
                 self.prompt_files = [f for f in os.listdir(self.prompt_folder) if f.endswith(".txt")]
                 self.prompt_files.sort()
                 
-                # Actualizar el dropdown
                 self.mode_select.configure(values=self.prompt_files)
                 self.mode_select.set(nombre)
                 
-                # Guardar la selección
                 from src.core.config import load_config, save_config
                 cfg = load_config()
                 cfg["SELECTED_PROMPT"] = nombre
                 save_config(cfg)
                 config["SELECTED_PROMPT"] = nombre
                 
-                # Cargar el nuevo prompt
                 with open(ruta, encoding="utf-8") as f:
                     self.current_prompt = f.read()
                 
                 self.log(f"Nueva personalidad '{nombre}' creada")
             except Exception as e:
                 self.log(f"Error al crear personalidad: {e}")
-
-    def test_voice(self):
-        stop_audio()
-        _, d = self.get_devices()
-        speak("Hola, prueba de voz", "es-ES-AlvaroNeural", d)
-
-    def test_ia(self):
-        def run():
-            stop_audio()
-            api_key = config.get("CEREBRAS_API_KEY", "")
-            if not api_key:
-                self.log("❌  Falta CEREBRAS_API_KEY")
-                return
-            r = ask_ai("Di algo como VTuber", api_key, self.current_prompt, "cerebras")
-            self.log(f"🤖  Cerebras: {r}")
-            _, d = self.get_devices()
-            speak(r, "es-MX-DaliaNeural", d)
-        threading.Thread(target=run, daemon=True).start()
-
+    
     def ptt_click(self):
         def run():
             try:
@@ -1534,7 +1308,7 @@ END OF TERMS AND CONDITIONS"""
             except Exception as e:
                 self.log(f"❌  PTT: {e}")
         threading.Thread(target=run, daemon=True).start()
-
+    
     # ════════════════════════════════════════════════════════════════════════
     #  TWITCH — Conexión con OAuth (FIX)
     # ════════════════════════════════════════════════════════════════════════
@@ -1545,7 +1319,6 @@ END OF TERMS AND CONDITIONS"""
         recibir el callback recarga la config y arranca el chat.
         """
         def _start_chat_with_current_config():
-            # Recargar config para obtener los valores actualizados
             from src.core.config import load_config
             cfg = load_config()
             
@@ -1558,15 +1331,16 @@ END OF TERMS AND CONDITIONS"""
                 return
             sd, idev = self.get_devices()
             start_chat(self, tok, nick, chan,
-                       cfg.get("GROQ_API_KEY", ""), sd, idev, self)
+                       cfg.get("GROQ_API_KEY", ""), sd, idev, self,
+                       ia_command=cfg.get("BOT_IA_COMMAND", "!IA"),
+                       ia_voice=cfg.get("BOT_IA_VOICE", "es-MX-DaliaNeural"))
             self.after(0, lambda: (
-                self.twitch_btn.configure(text="Conectado",
+                self.twitch_btn.configure(text="🟢  Conectado",
                                           fg_color=GRN, text_color=GRN_T),
             ))
-
+        
         def _on_oauth_success(token, nick, channel):
             self.log(f"✅  OAuth OK — usuario: {nick}")
-            # Recargar config.txt (oauth_server ya lo guardó)
             try:
                 from src.core.config import load_config
                 fresh = load_config()
@@ -1574,12 +1348,12 @@ END OF TERMS AND CONDITIONS"""
             except Exception as e:
                 self.log(f"⚠  No se pudo recargar config: {e}")
             _start_chat_with_current_config()
-
+        
         def _on_oauth_error(msg):
             self.log(f"❌  OAuth: {msg}")
             self.after(0, lambda: self.twitch_btn.configure(
-                text="🟣  Conectar Twitch", fg_color=PURP, text_color="#fff"))
-
+                text="🔴  Twitch", fg_color="#9146FF", text_color="#fff"))
+        
         def run():
             tok = config.get("TWITCH_TOKEN", "")
             if tok:
@@ -1587,88 +1361,36 @@ END OF TERMS AND CONDITIONS"""
                 if not validate_token(tok):
                     self.log("⚠  Token expirado o inválido. Abriendo OAuth...")
                     self.after(0, lambda: self.twitch_btn.configure(
-                        text="🟣  Autorizando...",
-                        fg_color=AMB, text_color=AMB_T))
-                    # Limpiar token inválido
-                    from src.core.oauth_server import clear_token_file
-                    clear_token_file()
+                        text="🟡  Autorizando...",
+                        fg_color=AMB, text_color="#fff"))
+                    from src.core.oauth_server import clear_token
+                    clear_token()
                     tok = None
                 else:
-                    self.log("🟣  Conectando Twitch con token guardado...")
+                    self.log("🔵  Conectando Twitch con token guardado...")
                     _start_chat_with_current_config()
                     return
-
-            # No hay token -> flujo OAuth
+            
             if TwitchOAuth is None:
                 self.log("❌  oauth_server no disponible (revisa secrets_manager.py)")
                 return
             self.log("🌐  Abriendo navegador para autorizar en Twitch...")
             self.after(0, lambda: self.twitch_btn.configure(
-                text="🟣  Esperando autorización...",
-                fg_color=AMB, text_color=AMB_T))
+                text="🟡  Esperando autorización...",
+                fg_color=AMB, text_color="#fff"))
             try:
                 TwitchOAuth(on_success=_on_oauth_success,
                             on_error=_on_oauth_error).start()
             except Exception as e:
                 self.log(f"❌  No se pudo iniciar OAuth: {e}")
                 self.log(traceback.format_exc())
-
+        
         threading.Thread(target=run, daemon=True).start()
-
-    # ── Comentarista ─────────────────────────────────────────────────────────
-    def toggle_watcher(self, event=None):
-        if self.comentarista_activo.get() and (not self.game_watcher or not self.game_watcher.activo):
-            if not GW_OK:
-                self.log("❌  game_watcher.py no disponible — pip install pillow")
-                self.comentarista_activo.set(False)
-                return
-            groq_key = config.get("GROQ_API_KEY", "")
-            google_key = config.get("GOOGLE_API_KEY", "")
-            if not groq_key and not google_key:
-                self.log("❌  Falta GROQ_API_KEY o GOOGLE_API_KEY")
-                self.comentarista_activo.set(False)
-                return
-            leer_chat = self.comentarista_leer_chat.get()
-            self.game_watcher = GameWatcher(
-                api_key=groq_key,
-                google_api_key=google_key,
-                speak_fn=speak, stop_audio_fn=stop_audio,
-                get_devices_fn=self.get_devices,
-                current_prompt_fn=lambda: self.current_prompt,
-                intervalo=30, voice="es-MX-DaliaNeural",
-                log_fn=self.log, modo_solo_ver=False,
-                get_twitch_messages_fn=get_twitch_messages,
-                leer_chat=leer_chat)
-            self.game_watcher.iniciar()
-            chat_str = " + CHAT" if leer_chat else ""
-            self.log(f"🎮 Comentarista INICIADO{chat_str}")
-        elif not self.comentarista_activo.get() and self.game_watcher and self.game_watcher.activo:
-            self.game_watcher.detener()
-            self.game_watcher = None
-            self.log("🎮 Comentarista DETENIDO")
-
-    # ── Traductor ─────────────────────────────────────────────────────────────
-    def _get_translator(self):
-        motor = self.trad_motor.get()
-        if self.translator is None:
-            self.translator = TranslatorManager(
-                master=self, api_key=config.get("GROQ_API_KEY", ""),
-                speak_fn=speak, stop_audio_fn=stop_audio,
-                get_devices_fn=self.get_devices, voice="es-MX-DaliaNeural",
-                idioma_destino=self.idioma_var.get(), log_fn=self.log,
-                leer_en_voz=self.leer_voz_var.get(), motor=motor)
-        else:
-            self.translator.idioma_destino = self.idioma_var.get()
-            self.translator.leer_en_voz    = self.leer_voz_var.get()
-            self.translator.motor          = motor
-        self.translator.intervalo = int(self.trad_intervalo_var.get())
-        return self.translator
-
+    
     def _guardar_config_panel(self):
         from src.core.config import load_config, save_config
         cfg = load_config()
         
-        # Guardar la personalidad seleccionada
         if hasattr(self, 'mode_select'):
             cfg["SELECTED_PROMPT"] = self.mode_select.get()
         
@@ -1685,7 +1407,6 @@ END OF TERMS AND CONDITIONS"""
             except:
                 cfg["IA_DEVICE"] = "0"
         
-        # Guardar tecla PTT
         if hasattr(self, 'ptt_key_entry'):
             ptt_key = self.ptt_key_entry.get().strip().upper()
             if not ptt_key:
@@ -1695,7 +1416,7 @@ END OF TERMS AND CONDITIONS"""
         
         save_config(cfg)
         self.log(f"Configuracion guardada ({ptt_key if hasattr(self, 'ptt_key_entry') else 'F9'})")
-
+    
     def _borrar_memoria(self):
         try:
             from src.ai.memory import clear_memory
@@ -1703,33 +1424,102 @@ END OF TERMS AND CONDITIONS"""
             self.log("🗑  Memoria borrada correctamente")
         except Exception as e:
             self.log(f"❌  Error al borrar memoria: {e}")
+    
+    def change_mode(self, filename):
+        from src.core.config import load_config, save_config
+        cfg = load_config()
+        cfg["SELECTED_PROMPT"] = filename
+        save_config(cfg)
+        config["SELECTED_PROMPT"] = filename
+        with open(os.path.join(self.prompt_folder, filename), encoding="utf-8") as f:
+            self.current_prompt = f.read()
+        self.log(f"Personalidad cambiada a: {filename}")
+    
+    def get_devices(self):
+        sn = self.sp2.get()
+        an = self.ia2.get()
+        mn = self.mn2.get()
+        sid = next((i for n, i in self.devices if n == sn), 0)
+        iid = next((i for n, i in self.devices if n == an), 0)
+        if mn in ("(Ninguno)", ""):
+            return sid, iid
+        mid = next((i for n, i in self.devices if n == mn), None)
+        return sid, ([iid, mid] if mid and mid != iid else iid)
+    
+    def log(self, text):
+        self.log_box.insert("end", text + "\n")
+        self.log_box.see("end")
+    
+    def wlog(self, text):
+        self.log(text)
+    
+    # ════════════════════════════════════════════════════════════════════════
+    #  AYUDA
+    # ════════════════════════════════════════════════════════════════════════
+    def _tab_creditos(self, parent):
+        tab = ctk.CTkFrame(parent, fg_color=BG, corner_radius=0)
+        
+        # ── Info + Enlaces ──
+        card = mk(tab, accent=True)
+        card.pack(fill="x", padx=14, pady=(12, 6))
+        lb(card, f"{APP_NAME}  v{APP_VERSION}", sz=15, bold=True).pack(anchor="w", padx=14, pady=(10, 2))
+        lb(card, "Asistente VTuber con inteligencia artificial — Twitch, TTS, STT, Comentarista",
+           sz=10, col=MUT).pack(anchor="w", padx=14, pady=(0, 4))
+        
+        ctk.CTkFrame(card, height=1, fg_color="#2a2a3e").pack(fill="x", padx=14, pady=(6, 6))
+        for label, url in [
+            ("Repositorio GitHub",      "https://github.com/manuel00084"),
+            ("Canal de Twitch",         "https://www.twitch.tv/manuel0084"),
+            ("Groq Console",            "https://console.groq.com/keys"),
+            ("Cerebras Cloud",          "https://cloud.cerebras.ai"),
+            ("Twitch Developer",        "https://dev.twitch.tv/console"),
+            ("Apache License 2.0",      "http://www.apache.org/licenses/LICENSE-2.0"),
+        ]:
+            row = ctk.CTkFrame(card, fg_color="transparent")
+            row.pack(fill="x", padx=14, pady=1)
+            lb(row, label, sz=10, col=MUT, width=130).pack(side="left")
+            lnk = lb(row, url, sz=10, col="#818cf8", cursor="hand2")
+            lnk.pack(side="left", padx=(8, 0))
+            lnk.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
+        ctk.CTkFrame(card, height=6, fg_color="transparent").pack()
 
-    def trad_area_unica(self):
-        t = self._get_translator()
-        if t: self.log("📐  Dibuja área..."); t.seleccionar_area_y_traducir()
+        # ── Licencia ──
+        legal = mk(tab)
+        legal.pack(fill="x", padx=14, pady=(0, 6))
+        lb(legal, "⚖️  Licencia", sz=12, bold=True, col=PURP).pack(anchor="w", padx=12, pady=(10, 2))
+        lb(legal, "Apache License 2.0", sz=10, col=MUT).pack(anchor="w", padx=12, pady=(2, 0))
+        a_link = lb(legal, "apache.org/licenses/LICENSE-2.0", sz=10, col="#818cf8", cursor="hand2")
+        a_link.pack(anchor="w", padx=12, pady=(0, 2))
+        a_link.bind("<Button-1>", lambda e: webbrowser.open("http://www.apache.org/licenses/LICENSE-2.0"))
+        lb(legal, "Desarrollado por Manuel0084", sz=10, col=MUT).pack(anchor="w", padx=12, pady=(2, 0))
+        lb(legal, "Copyright 2024", sz=10, col=MUT).pack(anchor="w", padx=12, pady=(0, 6))
 
-    def trad_pantalla_unica(self):
-        t = self._get_translator()
-        if t: self.log("🖥  Traduciendo..."); t.traducir_ahora(bbox=None)
+        # ── Third Party ──
+        tp = mk(tab)
+        tp.pack(fill="x", padx=14, pady=(0, 12))
+        lb(tp, "📦  Third Party", sz=12, bold=True, col=PURP).pack(anchor="w", padx=14, pady=(10, 2))
+        lb(tp, "Este proyecto utiliza software y modelos de terceros con sus respectivas licencias:",
+           sz=10, col=MUT).pack(anchor="w", padx=14, pady=(0, 4))
+        tg = ctk.CTkFrame(tp, fg_color="transparent")
+        tg.pack(fill="x", padx=14, pady=(4, 8))
+        tg.grid_columnconfigure((0, 1), weight=1)
+        third_party = [
+            ("Vosk", "Apache 2.0"),
+            ("Edge TTS", "Microsoft"),
+            ("CustomTkinter", "MIT"),
+            ("OpenCV", "Apache 2.0"),
+            ("TwitchIO", "MIT"),
+            ("PyTorch", "BSD"),
+            ("EasyOCR", "Apache 2.0"),
+            ("ONNX Runtime", "MIT"),
+            ("dxcam", "MIT"),
+            ("Groq / Cerebras API", "Propietaria"),
+        ]
+        for i, (lib, lic) in enumerate(third_party):
+            r, c = divmod(i, 2)
+            lb(tg, f"• {lib}  —  {lic}", sz=10, col=MUT).grid(row=r, column=c, sticky="w", pady=1, padx=(0, 8))
 
-    def trad_continuo_area(self):
-        t = self._get_translator()
-        if t:
-            if t.activo: self.log("⚠  Ya hay traducción activa"); return
-            self.log("📐  Dibuja área continua...")
-            t.seleccionar_area_continuo(); self.btn_detener_trad.configure(state="normal")
-
-    def trad_continuo_full(self):
-        t = self._get_translator()
-        if t:
-            if t.activo: self.log("⚠  Ya hay traducción activa"); return
-            t.area_fija = None; t.iniciar_continuo()
-            self.btn_detener_trad.configure(state="normal")
-
-    def detener_traduccion(self):
-        if self.translator: self.translator.detener_continuo()
-        self.btn_detener_trad.configure(state="disabled")
-        self.log("⏹  Traducción detenida")
+        return tab
 
 
 # ════════════════════════════════════════════════════════════════════════════
