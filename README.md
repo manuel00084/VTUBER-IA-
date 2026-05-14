@@ -397,6 +397,19 @@ OBS Studio / Streaming
 
 ---
 
+# ⚠️ Advertencia
+
+> [!WARNING]
+> **Karin VTuber IA** es un proyecto experimental actualmente en desarrollo.
+>
+> Algunas funciones pueden cambiar, presentar errores o comportarse de forma inesperada dependiendo del hardware, APIs utilizadas o software externo conectado.
+>
+> El proyecto puede consumir una cantidad considerable de CPU, GPU y memoria RAM dependiendo de las funciones activas (IA, OCR, TTS, visión artificial, captura de pantalla, etc.).
+> La opcion de OCR Se encuentra desactivada por defecto (puede activarce si requiere usarlo) esto es debido a que consume 500mb de ram, Este problema es ocasionado por el Easyocr y pythor ambos trabajan juntos
+> generando un consumo exagerado de ram. 
+
+---
+
 # 🚧 Estado del Proyecto
 
 ⚠️ Proyecto experimental en desarrollo activo.
