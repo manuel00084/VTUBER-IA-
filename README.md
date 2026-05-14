@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  OCR • OpenCV • IA Conversacional • Vision AI • TTS • Twitch • VRM • Automatización
+  OCR • OpenCV • IA Conversacional • Vision AI • TTS • Twitch • Automatización
 </p>
 
 <p align="center">
