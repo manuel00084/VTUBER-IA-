@@ -316,8 +316,10 @@ Karin-VTuber--IA-
 
 | Software Compatible | Estado |
 |----------------------|---------|
-| :VSeeFace} | ✅ Compatible |
-| :contentReference[oaicite:1]{index=1} | ✅ Compatible |
+| VSeeFace | ✅ Compatible |
+| VNyan    | ✅ Compatible |
+| VTube Studio | ✅ Compatible |
+| VMagicMirror | ✅ Compatible |
 | Otros programas VTuber compatibles | ✅ Funcional |
 
 </div>
