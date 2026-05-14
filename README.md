@@ -68,7 +68,7 @@ Sistema capaz de analizar lo que ocurre en pantalla y generar comentarios autom�
 ## 👁️ OCR en Tiempo Real
 
 * EasyOCR
-* Tesseract OCR
+* Windows OCR
 * Lectura automática de texto
 * Detección de keywords
 * Comentarios basados en eventos
@@ -88,9 +88,9 @@ Integración con modelos IA para generar:
 ### APIs utilizadas
 
 * Cerebras
+  https://www.cerebras.ai
 * Groq
-* Groq Vision
-
+  https://console.groq.com/keys
 ---
 
 ## 🎤 Audio y Voz
@@ -314,7 +314,7 @@ Karin-VTuber--IA-
 
 ⚠️ Proyecto experimental en desarrollo activo.
 
-Algunas funciones aún están en fase beta.
+Algunas funciones aún están en fase beta. Puede aver errores que se me ayan escapado.
 
 ## Estado actual:
 
@@ -326,7 +326,6 @@ Algunas funciones aún están en fase beta.
 * ✅ Comentarista IA
 * ⚠️ Optimización pendiente
 * ⚠️ Compatibilidad Linux/Mac parcial
-* ⚠️ Sistema VRM en evolución
 
 ---
 
@@ -335,10 +334,11 @@ Algunas funciones aún están en fase beta.
 ## v1.0
 
 * [ ] Mejor estabilidad
-* [ ] Sistema VRM completo
 * [ ] Optimización OCR
 * [ ] Mejoras de rendimiento
-* [ ] Sistema de plugins
+* [ ] Traductor
+* [ ] sistema de monetizacion.
+* [ ] Mejor intefaz Grafica
 
 ## Futuro
 
@@ -350,6 +350,7 @@ Algunas funciones aún están en fase beta.
 * [ ] Modo streamer autónomo
 * [ ] IA emocional
 * [ ] Integración multi-modelo
+* [ ] Sistema VRM completo
 
 ---
 
@@ -375,24 +376,9 @@ Algunas funciones aún están en fase beta.
 
 ---
 
-# 🤝 Contribuciones
-
-Las contribuciones son bienvenidas.
-
-Puedes ayudar con:
-
-* optimización
-* corrección de bugs
-* soporte multiplataforma
-* mejoras UI
-* nuevas integraciones IA
-* documentación
-
----
-
 # 📜 Licencia
 
-Este proyecto está bajo licencia MIT.
+Este proyecto está bajo licencia Apache 2.0
 
 ---
 
@@ -404,7 +390,9 @@ Karin VTuber -IA- busca explorar el futuro de:
 * comentaristas IA
 * análisis visual en videojuegos
 * interacción en streaming
-* companions IA en tiempo real
+* compañer@s IA en tiempo real
+* convertise entre los mejores
+* Superar Neurosama
 
 Combinando visión computacional, OCR y modelos de lenguaje modernos.
 
@@ -414,8 +402,28 @@ Combinando visión computacional, OCR y modelos de lenguaje modernos.
 
 Proyecto creado por:
 
-## Manuel Montes de Oca
+## Manuel0084
 
 GitHub:
 
 [https://github.com/manuel00084](https://github.com/manuel00084)
+[[https://github.com/manuel00084](https://www.twitch.tv/manuel0084)]([https://github.com/manuel00084](https://www.twitch.tv/manuel0084))
+
+---
+
+# 📦 Third-Party Technologies
+
+Karin VTuber -IA- uses several open source projects and external APIs.
+
+| Technology | Purpose | License |
+|---|---|---|
+| Python | Main programming language | PSF |
+| OpenCV | Computer vision | Apache 2.0 |
+| EasyOCR | OCR text recognition | Apache 2.0 |
+| Tesseract OCR | OCR engine | Apache 2.0 |
+| customtkinter | User Interface | MIT |
+| edge-tts | Text-To-Speech | GPL-3.0 |
+| Vosk | Speech Recognition | Apache 2.0 |
+| Groq API | Vision / LLM | Proprietary |
+| Cerebras API | AI generation | Proprietary |
+| Twitch API | Twitch integration | Proprietary |
