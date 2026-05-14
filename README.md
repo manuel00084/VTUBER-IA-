@@ -407,7 +407,9 @@ Proyecto creado por:
 GitHub:
 
 [https://github.com/manuel00084](https://github.com/manuel00084)
-[[https://github.com/manuel00084](https://www.twitch.tv/manuel0084)]([https://github.com/manuel00084](https://www.twitch.tv/manuel0084))
+
+Twitch
+[https://www.twitch.tv/manuel0084)](https://www.twitch.tv/manuel0084)
 
 ---
 
