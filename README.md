@@ -310,6 +310,62 @@ Karin-VTuber--IA-
 
 ---
 
+## 🎭 Integración con Software VTuber
+
+<div align="center">
+
+| Software Compatible | Estado |
+|----------------------|---------|
+| :VSeeFace} | ✅ Compatible |
+| :contentReference[oaicite:1]{index=1} | ✅ Compatible |
+| Otros programas VTuber compatibles | ✅ Funcional |
+
+</div>
+
+<p align="center">
+  <i>Karin VTuber IA puede integrarse con distintas aplicaciones de VTubing para crear streams interactivos, personajes virtuales y asistentes IA en tiempo real.</i>
+</p>
+
+---
+
+## 🔊 Recomendación de Audio Virtual
+
+Para obtener una mejor experiencia de audio entre la IA, el micrófono, TTS y las aplicaciones VTuber, se recomienda utilizar:
+
+<div align="center">
+
+### [VB-Audio Virtual Cable](https://vb-audio.com/Cable/?utm_source=chatgpt.com)
+
+Audio virtual estable y flexible para routing de voz y aplicaciones en tiempo real.
+
+</div>
+
+### ✅ Beneficios
+
+- Enrutamiento de audio entre aplicaciones
+- Integración sencilla con software VTuber
+- Compatible con sistemas de TTS y ASR
+- Ideal para streaming y contenido en vivo
+- Reduce conflictos entre dispositivos de audio
+
+---
+
+## 🚀 Flujo Recomendado
+
+```text
+Karin VTuber IA
+        │
+        ▼
+VB-Audio Virtual Cable
+        │
+        ▼
+VMagicMirror / VTube Studio
+        │
+        ▼
+OBS Studio / Streaming
+
+---
+
 # 🚧 Estado del Proyecto
 
 ⚠️ Proyecto experimental en desarrollo activo.
