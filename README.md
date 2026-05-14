@@ -1,7 +1,7 @@
 # Karin VTuber -IA-
 
 <p align="center">
-  <img src="./assets/logo.png" width="220" alt="Karin VTuber IA Logo">
+  <img src="https://i.postimg.cc/PxLbTvCX/9302f3e1-ad66-4197-87fa-f9372e76a239.png" width="220" alt="Karin VTuber IA Logo">
 </p>
 
 <h1 align="center">Karin VTuber -IA-</h1>
