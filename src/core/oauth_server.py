@@ -3,43 +3,20 @@ oauth_server.py
 """
 import http.server, threading, webbrowser, urllib.parse, requests
 
-CONFIG_PATH = None
-
-def _get_config_path():
-    global CONFIG_PATH
-    if CONFIG_PATH is None:
-        import os
-        CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "config", "config.txt")
-    return CONFIG_PATH
+from src.core.secrets_manager import (
+    load_config, save_config, set_secret
+)
 
 REDIRECT_URI = "http://localhost:3000"
 SCOPES = "chat:read chat:edit user:read:email"
 
-def _load_config():
-    cfg = {}
-    try:
-        with open(_get_config_path(), "r", encoding="utf-8") as f:
-            for line in f:
-                if "=" in line:
-                    k, v = line.strip().split("=", 1)
-                    cfg[k.strip()] = v.strip()
-    except FileNotFoundError:
-        pass
-    return cfg
-
-def _save_config(cfg):
-    try:
-        with open(_get_config_path(), "w", encoding="utf-8") as f:
-            for k, v in cfg.items():
-                f.write(f"{k}={v}\n")
-    except:
-        pass
-
 def get_client_id():
-    return _load_config().get("TWITCH_CLIENT_ID", "").strip()
+    cfg = load_config()
+    return cfg.get("TWITCH_CLIENT_ID", "").strip()
 
 def get_client_secret():
-    return _load_config().get("TWITCH_CLIENT_SECRET", "").strip()
+    cfg = load_config()
+    return cfg.get("TWITCH_CLIENT_SECRET", "").strip()
 
 def _exchange_code(code):
     client_id = get_client_id()
@@ -72,9 +49,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._r(500, "Error con el token."); return
         user = _get_user(token)
         nick = user.get("login", "")
-        cfg = _load_config()
+        cfg = load_config()
         cfg.update({"TWITCH_TOKEN": token, "NICK": nick, "CHANNEL": nick})
-        _save_config(cfg)
+        save_config(cfg)
         self._r(200, f'<html><body style="font-family:sans-serif;text-align:center;margin-top:80px;background:#1a1a2e;color:#eaeaea"><h2 style="color:#9B59B6">Conectado como <b>{nick}</b></h2><p>Cierra esta ventana y vuelve a la app.</p><script>setTimeout(()=>window.close(),2000)</script></body></html>')
         if _Handler.callback:
             threading.Thread(target=_Handler.callback, args=(token, nick, nick), daemon=True).start()
@@ -112,7 +89,33 @@ def validate_token(token):
         return False
 
 def clear_token():
-    cfg = _load_config()
-    if "TWITCH_TOKEN" in cfg:
-        del cfg["TWITCH_TOKEN"]
-        _save_config(cfg)
+    from src.core.secrets_manager import clear_secret
+    clear_secret("TWITCH_TOKEN")
+    cfg = load_config()
+    cfg.pop("TWITCH_TOKEN", None)
+    save_config(cfg)
+
+def fetch_twitch_game(token, channel):
+    """Obtiene el nombre del juego desde la API de Twitch"""
+    from src.core.secrets_manager import load_config
+    cfg = load_config()
+    client_id = cfg.get("TWITCH_CLIENT_ID", "")
+    if not token or not client_id or not channel:
+        return None
+    try:
+        r = requests.get(
+            f"https://api.twitch.tv/helix/streams?user_login={channel.strip().lower()}",
+            headers={
+                "Authorization": f"Bearer {token.strip()}",
+                "Client-Id": client_id.strip()
+            },
+            timeout=10
+        )
+        if r.status_code != 200:
+            return None
+        data = r.json().get("data", [])
+        if data:
+            return data[0].get("game_name", "")
+        return "Just Chatting"
+    except Exception:
+        return None
