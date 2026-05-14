@@ -1,0 +1,30 @@
+# Configuración de Teclas para Player IA
+# Formato: accion=tecla
+
+# Player 1 (WASD + teclas)
+derecha=d
+izquierda=a
+arriba=w
+abajo=s
+saltar=space
+atacar=j
+defender=k
+recoger=e
+correr=shift
+menu=tab
+pausa=esc
+especial=u
+
+# Player 2 (Arrow keys + numpad)
+p2_derecha=right
+p2_izquierda=left
+p2_arriba=up
+p2_abajo=down
+p2_saltar=num2
+p2_atacar=.
+p2_defender=/
+p2_recoger=p
+p2_correr=rshift
+p2_menu=home
+p2_pausa=end
+p2_especial=insert

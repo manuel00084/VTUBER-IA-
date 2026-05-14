@@ -1,0 +1,68 @@
+# ============================================
+# CONFIGURACIÓN GAMEPAD - XBOX 360 CONTROLLER
+# ============================================
+
+# --- BOTONES DEL MANDO (Índices de pygame) ---
+# Xbox 360: A=0, B=1, X=2, Y=3, LB=4, RB=5, Back=6, Start=7, Stick Izq=8, Stick Der=9
+
+atacar=0          # A (verde) - Botón principal acción
+defender=1        # B (rojo) - Botón defensa/cancelar
+saltar=2          # X (azul) - Botón salto
+especial=3        # Y (amarillo) - Botón especial/habilidad especial
+recoger=4         # LB ( bumper izquierdo) - Botón hombro izq
+correr=5          # RB (bumper derecho) - Botón hombro der
+menu=6            # Back - Botón atrás/atrás
+pausa=7           # Start - Botón inicio/menú
+guia=8            # Guide (botón Xbox central)
+
+# --- STICKS ANALÓGICOS (Ejes) ---
+# Los sticks tienen dos ejes cada uno (X e Y)
+
+stick_izq_x=0     # Stick izquierdo horizontal (-1 izq, +1 der)
+stick_izq_y=1     # Stick izquierdo vertical (-1 arriba, +1 abajo)
+stick_der_x=2     # Stick derecho horizontal
+stick_der_y=3     # Stick derecho vertical
+
+# --- GATILLOS (Triggers) ---
+# Los gatillos son ejes analógicos (0 = sin presionar, 1 = completo)
+
+trigger_izq=4     # LT (Left Trigger) - Gatillo izquierdo
+trigger_der=5     # RT (Right Trigger) - Gatillo derecho
+
+# --- D-PAD (CROSS) ---
+# El D-Pad puede funcionar como botones o ejes según el driver
+
+dpad_arriba=0     # D-Pad arriba (cuando es botones)
+dpad_abajo=1      # D-Pad abajo
+dpad_izquierda=2  # D-Pad izquierda
+dpad_derecha=3    # D-Pad derecha
+
+# --- SENSIBILIDAD Y ZONAS MUERTAS ---
+deadzone_stick=0.15      # Zona muerta sticks (recomendado 0.15 para Xbox 360)
+deadzone_trigger=0.1     # Zona muerto gatillos (recomendado 0.1)
+sensibilidad=1.0        # Sensibilidad adicional (1.0 = normal)
+
+# --- INVERSIÓN DE EJES ---
+invertir_stick_x=False   # Invertir horizontal
+invertir_stick_y=False   # Invertir vertical
+
+# --- CONFIGURACIÓN PARA JUEGOS ESPECÍFICOS ---
+# Descomenta y modifica según el juego:
+
+# [Plataformas / Arcade]
+# saltar=2
+# atacar=0
+
+# [FPS / Shooters]
+# aim=2        # Stick derecho para apuntar
+# shoot=0     # Disparar
+
+# [Lucha]
+# punch=0     # Golpe rápido
+# kick=1      # Patada
+# grab=3      # Agarrar
+
+# [RPG]
+# menu=6      # Abrir inventario
+# aceptar=0  # Confirmar
+# cancelar=1 # Cancelar/Volver
