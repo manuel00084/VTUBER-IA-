@@ -1,4 +1,4 @@
-# Mas que una VTuber Con Inteligencia Artificial Real para TODOS, una compañera Gamer.
+# No solo una VTuber IA. Una verdadera compañera gamer.
 <p align="center">
   <img src="https://i.postimg.cc/PxLbTvCX/9302f3e1-ad66-4197-87fa-f9372e76a239.png" width="220" alt="Karin VTuber IA Logo">
 </p>
