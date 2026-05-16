@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Karin VTuber — Tutorial</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --card: #23234a;
+    --card2: #2a2a52;
+    --purp: #8b5cf6;
+    --pink: #ec4899;
+    --grn: #10b981;
+    --txt: #e2e8f0;
+    --mut: #94a3b8;
+    --bord: #373760;
+    --accent: linear-gradient(135deg, #8b5cf6, #ec4899);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--txt);
+    line-height: 1.7;
+  }
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--purp); border-radius: 4px; }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+
+  img { max-width: 100%; height: auto; border-radius: 12px; margin: 16px 0; }
+
+  /* Header */
+  header {
+    background: var(--accent);
+    padding: 32px 0 28px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  header::after {
+    content: '';
+    position: absolute;
+    bottom: -30px;
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: var(--bg);
+    border-radius: 50% 50% 0 0;
+  }
+  header .logo { width: 80px; height: 80px; border-radius: 50%; margin-bottom: 8px; border: 3px solid rgba(255,255,255,.3); }
+  header h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.5px; }
+  header p { font-size: 1rem; color: rgba(255,255,255,.7); margin-top: 6px; }
+
+  /* Sidebar nav */
+  .nav-bar {
+    background: var(--card);
+    border-bottom: 1px solid var(--bord);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .nav-bar .container {
+    display: flex;
+    gap: 0;
+    overflow-x: auto;
+    padding: 0;
+  }
+  .nav-bar a {
+    color: var(--mut);
+    text-decoration: none;
+    padding: 12px 16px;
+    font-size: .85rem;
+    white-space: nowrap;
+    border-bottom: 2px solid transparent;
+    transition: .2s;
+  }
+  .nav-bar a:hover, .nav-bar a.active {
+    color: var(--txt);
+    border-bottom-color: var(--purp);
+  }
+
+  /* Sections */
+  section { padding: 48px 0; border-bottom: 1px solid var(--bord); }
+  section:last-child { border-bottom: none; }
+  h2 {
+    font-size: 1.6rem;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  h2 .icon { font-size: 1.8rem; }
+  h3 {
+    font-size: 1.1rem;
+    color: var(--pink);
+    margin: 24px 0 8px;
+  }
+  p, li { color: var(--mut); margin-bottom: 8px; }
+  ul, ol { padding-left: 24px; margin: 8px 0 16px; }
+  li { margin-bottom: 4px; }
+  strong { color: var(--txt); }
+  code {
+    background: var(--card2);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: .85rem;
+    color: var(--pink);
+  }
+
+  /* Cards */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+    margin: 16px 0;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--bord);
+    border-radius: 12px;
+    padding: 20px;
+    transition: .2s;
+  }
+  .card:hover { border-color: var(--purp); transform: translateY(-2px); }
+  .card h4 { color: var(--purp); font-size: .95rem; margin-bottom: 6px; }
+  .card p { font-size: .85rem; margin: 0; }
+
+  /* Screenshot placeholder */
+  .screenshot {
+    background: var(--card2);
+    border: 2px dashed var(--bord);
+    border-radius: 12px;
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--mut);
+    font-size: .9rem;
+    margin: 16px 0;
+    position: relative;
+  }
+  .screenshot .label {
+    font-size: .8rem;
+    background: var(--card);
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 6px;
+    margin-top: 8px;
+  }
+
+  /* Table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: .85rem;
+  }
+  th, td {
+    border: 1px solid var(--bord);
+    padding: 8px 12px;
+    text-align: left;
+  }
+  th { background: var(--card); color: var(--purp); font-weight: 600; }
+  td { background: var(--card2); }
+
+  /* Badges */
+  .tag {
+    display: inline-block;
+    background: var(--purp);
+    color: #fff;
+    font-size: .7rem;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-weight: 600;
+  }
+  .tag.grn { background: var(--grn); }
+  .tag.pink { background: var(--pink); }
+
+  /* Steps */
+  .step {
+    background: var(--card);
+    border-left: 3px solid var(--purp);
+    padding: 12px 16px;
+    margin: 8px 0;
+    border-radius: 0 8px 8px 0;
+  }
+  .step .num {
+    color: var(--purp);
+    font-weight: 700;
+    font-size: .85rem;
+  }
+
+  footer {
+    text-align: center;
+    padding: 32px 0;
+    color: var(--mut);
+    font-size: .85rem;
+  }
+
+  @media (max-width: 600px) {
+    header h1 { font-size: 1.6rem; }
+    .card-grid { grid-template-columns: 1fr; }
+    .nav-bar a { padding: 10px 12px; font-size: .8rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <img src="tutorial_images/Logo.png" alt="Karin VTuber Logo" class="logo">
+    <h1>Karin VTuber</h1>
+    <p>Asistente VTuber con inteligencia artificial — Twitch, TTS, STT, Comentarista</p>
+  </div>
+</header>
+
+<nav class="nav-bar">
+  <div class="container">
+    <a href="#inicio">Inicio</a>
+    <a href="#panel">Panel</a>
+    <a href="#audio">Audio</a>
+    <a href="#bot-speaker">Bot Speaker</a>
+    <a href="#chat-bot-ia">Chat Bot IA</a>
+
+    <a href="#api-keys">API Keys</a>
+    <a href="#ayuda">Ayuda</a>
+    <a href="#ia-system">Sistema IA</a>
+    <a href="#config">Configuración</a>
+  </div>
+</nav>
+
+<!-- ════════════════════════════════════════ INICIO -->
+<section id="inicio">
+  <div class="container">
+    <h2><span class="icon">🏠</span> Inicio</h2>
+    <p>Karin VTuber es una aplicación de escritorio que te permite tener una <strong>asistente VTuber con IA</strong> para tus streams de Twitch. Integra reconocimiento de voz, síntesis de voz, chat con IA y comentarista automático de juegos.</p>
+
+    <div class="step">
+      <span class="num">Paso 1</span> — <strong>Consigue tus API Keys</strong> en <a href="https://console.groq.com" target="_blank" style="color:var(--pink)">Groq</a>, <a href="https://cloud.cerebras.ai" target="_blank" style="color:var(--pink)">Cerebras</a> y <a href="https://aistudio.google.com" target="_blank" style="color:var(--pink)">Google Studio</a>.
+    </div>
+    <div class="step">
+      <span class="num">Paso 2</span> — <strong>Conecta Twitch</strong> desde el botón rojo en la barra lateral.
+    </div>
+    <div class="step">
+      <span class="num">Paso 3</span> — <strong>Configura audio</strong> en la pestaña Audio (selecciona tus dispositivos de salida).
+    </div>
+    <div class="step">
+      <span class="num">Paso 4</span> — <strong>Elige una personalidad</strong> para tu asistente desde el Panel.
+    </div>
+    <div class="step">
+      <span class="num">Paso 5</span> — <strong>¡Disfruta!</strong> Activa el comentarista y el chat de Twitch.
+
+    <img src="tutorial_images/Panel.png" alt="Pantalla principal">
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ BARRA LATERAL -->
+<section id="sidebar">
+  <div class="container">
+    <h2><span class="icon">📌</span> Barra Lateral</h2>
+    <p>La barra lateral izquierda contiene la navegación principal y el botón de conexión a Twitch.</p>
+
+    <div class="card-grid">
+      <div class="card">
+        <h4>📊 Panel</h4>
+        <p>Dashboard principal con log de actividad, selector de personalidad y Push-to-Talk.</p>
+      </div>
+      <div class="card">
+        <h4>🎧 Audio</h4>
+        <p>Configuración de dispositivos de salida de audio (Bot Speaker, IA Voz, Monitor).</p>
+      </div>
+      <div class="card">
+        <h4>🤖 Bot Speaker</h4>
+        <p>Comandos de Twitch para TTS con voces masculina/femenina y sonidos personalizados.</p>
+      </div>
+      <div class="card">
+        <h4>💬 Chat Bot IA</h4>
+        <p>Configuración del chat IA de Twitch y el Modo Asistente IA para comentar juegos.</p>
+      </div>
+      <div class="card">
+        <h4>🔑 API Keys</h4>
+        <p>Gestión de claves de API para Groq, Cerebras y Google Studio.</p>
+      </div>
+      <div class="card">
+        <h4>❓ Ayuda</h4>
+        <p>Créditos, licencia y enlaces útiles.</p>
+      </div>
+    </div>
+      <div class="card">
+        <h4>❓ Ayuda</h4>
+        <p>Créditos, licencia y enlaces útiles.</p>
+      </div>
+    </div>
+
+    <h3>🔴 Botón Twitch</h3>
+    <p>En la parte inferior de la barra lateral. Inicia el flujo OAuth para conectar tu cuenta de Twitch. Estados:</p>
+    <ul>
+      <li><strong>🔴 Twitch</strong> — Desconectado, listo para conectar</li>
+      <li><strong>🟡 Esperando autorización...</strong> — Abriendo navegador para autenticación</li>
+      <li><strong>🟢 Conectado</strong> — Bot de Twitch activo en tu canal</li>
+    </ul>
+
+    <img src="tutorial_images/Panel.png" alt="Barra lateral">
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ PANEL -->
+<section id="panel">
+  <div class="container">
+    <h2><span class="icon">📊</span> Panel (Dashboard)</h2>
+    <p>El panel principal donde controlas la personalidad de tu asistente, el Push-to-Talk y ves el registro de actividad.</p>
+
+    <h3>📝 Log de Actividad</h3>
+    <p>Área de texto en tiempo real que muestra todos los eventos: errores, mensajes del chat, cambios de estado, etc.</p>
+
+    <h3>🎭 Selector de Personalidad</h3>
+    <p>Elige entre <strong>11 personalidades</strong> predefinidas o crea la tuya propia:</p>
+    <div class="card-grid">
+      <div class="card"><h4>default</h4><p>Serena, refinada, educada, elegante y clásica.</p></div>
+      <div class="card"><h4>GENKI</h4><p>Súper energética, optimista, ruidosa y emocional.</p></div>
+      <div class="card"><h4>TSUNDERE</h4><p>Fría, hostil, orgullosa, sarcástica y dominante.</p></div>
+      <div class="card"><h4>KUUDERE</h4><p>Fría, reservada, madura, elegante y seria.</p></div>
+      <div class="card"><h4>DANDERE</h4><p>Tímida, callada, suave y dulce (se abre con el tiempo).</p></div>
+      <div class="card"><h4>DOJIKKO</h4><p>Torpe, adorable, distraída y vergonzosa.</p></div>
+      <div class="card"><h4>ONEESAN</h4><p>Hermana mayor, cariñosa, protectora y juguetona.</p></div>
+      <div class="card"><h4>FRESA</h4><p>Glam, fashion, influencer, presumida y luxury.</p></div>
+      <div class="card"><h4>NACA</h4><p>Callejera, urbana, sin filtros y escandalosa.</p></div>
+      <div class="card"><h4>STREAMER</h4><p>Energética, carismática, segura y directa.</p></div>
+      <div class="card"><h4>✨ Nueva</h4><p>Crea tu propia personalidad con el botón "+ Nueva Personalidad".</p></div>
+    </div>
+
+    <h3>🎤 Push-to-Talk (PTT)</h3>
+    <p>Mantén presionada la tecla <strong>CTRL + F9</strong> (configurable) para hablar, suéltala para que la IA responda.</p>
+    <ul>
+      <li><strong>Tecla:</strong> Por defecto <code>F9</code>, configurable desde el campo "Tecla PTT"</li>
+      <li><strong>🎤 Hablar:</strong> Botón alternativo para grabación de 4 segundos</li>
+      <li><strong>Flujo:</strong> Presiona → graba Vosk STT → suelta → envía a Cerebras → responde por TTS</li>
+    </ul>
+
+    <h3>🗑️ Borrar Memoria</h3>
+    <p>Elimina el archivo <code>data/memoria.json</code> que contiene el historial de conversaciones con todos los usuarios.</p>
+
+    <img src="tutorial_images/Panel.png" alt="Panel principal">
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ AUDIO -->
+<section id="audio">
+  <div class="container">
+    <h2><span class="icon">🎧</span> Audio</h2>
+    <p>Configura los dispositivos de salida de audio para cada componente de la aplicación.</p>
+
+    <h3>Dispositivos de Salida</h3>
+    <table>
+      <tr><th>Dispositivo</th><th>Config Key</th><th>Descripción</th></tr>
+      <tr><td><strong>Bot Speaker</strong></td><td><code>SPEAKER_DEVICE</code></td><td>Reproduce comandos de voz de Twitch (!sp, !spm) y sonidos personalizados</td></tr>
+      <tr><td><strong>IA Voz</strong></td><td><code>IA_DEVICE</code></td><td>Reproduce respuestas de la IA (chat, comentarista)</td></tr>
+      <tr><td><strong>Monitor</strong></td><td><code>MONITOR_DEVICE</code></td><td>Dispositivo opcional de monitoreo</td></tr>
+    </table>
+    <p>Haz clic en <strong>"💾 Guardar dispositivos"</strong> para guardar la configuración.</p>
+
+    <h3>Voces TTS Disponibles</h3>
+    <p>Usa <strong>Microsoft Edge TTS</strong> (voz neuronal de alta calidad). 7 voces en español:</p>
+    <div class="card-grid">
+      <div class="card"><h4>es-ES-ElviraNeural</h4><p>Español España, femenina</p></div>
+      <div class="card"><h4>es-ES-AlvaroNeural</h4><p>Español España, masculina</p></div>
+      <div class="card"><h4>es-MX-DaliaNeural</h4><p>Español México, femenina</p></div>
+      <div class="card"><h4>es-MX-LiaNeural</h4><p>Español México, femenina</p></div>
+      <div class="card"><h4>es-MX-DarioNeural</h4><p>Español México, masculina</p></div>
+      <div class="card"><h4>es-AR-EmiliaNeural</h4><p>Español Argentina, femenina</p></div>
+      <div class="card"><h4>es-AR-TonoNeural</h4><p>Español Argentina, masculina</p></div>
+    </div>
+
+    <img src="tutorial_images/Audio.png" alt="Pestaña Audio">
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ BOT SPEAKER -->
+<section id="bot-speaker">
+  <div class="container">
+    <h2><span class="icon">🤖</span> Bot Speaker</h2>
+    <p>Configura comandos de Twitch para que los viewers activen la voz de Karin o reproduzcan sonidos personalizados.</p>
+
+    <h3>Comandos de Voz</h3>
+    <table>
+      <tr><th>Comando</th><th>Defecto</th><th>Voz</th><th>Descripción</th></tr>
+      <tr><td><strong>!sp</strong></td><td><code>!sp</code></td><td>Masculina (DarioNeural)</td><td>Los viewers escriben <code>!sp texto</code> y Karin lo dice con voz masculina</td></tr>
+      <tr><td><strong>!spm</strong></td><td><code>!spm</code></td><td>Femenina (DaliaNeural)</td><td>Los viewers escriben <code>!spm texto</code> y Karin lo dice con voz femenina</td></tr>
+    </table>
+
+    <h3>Sonidos Personalizados</h3>
+    <p>5 slots configurables. Cada slot tiene:</p>
+    <ul>
+      <li><strong>📂</strong> — Seleccionar archivo de audio (.mp3, .wav, .ogg)</li>
+      <li><strong>▶</strong> — Vista previa del sonido</li>
+      <li><strong>Comando Twitch</strong> — Ej: <code>!heal</code>, <code>!boom</code></li>
+    </ul>
+    <p>Los viewers escriben el comando en el chat y el sonido se reproduce en el stream.</p>
+
+    <img src="tutorial_images/Bot Speaker.png" alt="Pestaña Bot Speaker">
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ CHAT BOT IA -->
+<section id="chat-bot-ia">
+  <div class="container">
+    <h2><span class="icon">💬</span> Chat Bot IA</h2>
+    <p>La pestaña más completa. Controla el chat IA de Twitch y el Modo Asistente IA para comentar juegos automáticamente.</p>
+
+    <h3>🤖 IA para Twitch Chat</h3>
+    <p>Los viewers escriben <strong>!IA + mensaje</strong> en el chat y la IA responde con voz. Configura:</p>
+    <ul>
+      <li><strong>Comando:</strong> Por defecto <code>!IA</code></li>
+      <li><strong>Proveedor IA:</strong> Groq, Cerebras o Google Studio IA</li>
+      <li><strong>Voz TTS:</strong> Cualquiera de las 7 voces disponibles</li>
+      <li><strong>🔊 Test:</strong> Prueba la voz seleccionada</li>
+    </ul>
+
+    <h3>🎮 Modo Asistente IA</h3>
+    <p>Analiza la pantalla del juego y comenta automáticamente. <strong>4 modos</strong> disponibles:</p>
+
+    <div class="card-grid">
+      <div class="card">
+        <h4>1️⃣ OCR</h4>
+        <p>Solo lectura de texto en pantalla (cuadros de diálogo, menús). Bajo consumo de CPU, ideal para juegos con diálogos en español.</p>
+      </div>
+      <div class="card">
+        <h4>2️⃣ OCR + Vision + IA</h4>
+        <p>Combina OCR con detección visual de objetos (enemigos, barras de vida, minimapas) y comentarios generados por IA. Usa <strong>Karin Vision Lite</strong>.</p>
+      </div>
+      <div class="card">
+        <h4>3️⃣ GROQ Vision + Google Vision</h4>
+        <p>Usa modelos de IA con visión (llama-3.2-11b-vision, gemini-2.0-flash) para analizar la pantalla. Máximo detalle pero consume más tokens.</p>
+      </div>
+      <div class="card">
+        <h4>4️⃣ OCR + Karin Animadora + IA</h4>
+        <p>Entretenimiento y apoyo. Lee el chat de Twitch, saluda usuarios, da frases motivacionales, poesía gamer y narración épica. Usa la IA para generar frases nuevas y las guarda en <code>karin_animadora.txt</code>.</p>
+      </div>
+    </div>
+
+    <h3>Configuración del Asistente</h3>
+    <table>
+      <tr><th>Campo</th><th>Defecto</th><th>Descripción</th></tr>
+      <tr><td>Juego</td><td>(vacío)</td><td>Nombre del juego que estás transmitiendo</td></tr>
+      <tr><td>Intervalo (seg)</td><td>30</td><td>Cada cuántos segundos revisa la pantalla</td></tr>
+      <tr><td>Modo</td><td>OCR</td><td>Uno de los 4 modos disponibles</td></tr>
+      <tr><td>Cooldown (seg)</td><td>30</td><td>Tiempo mínimo entre comentarios para no saturar</td></tr>
+      <tr><td>🎮 Detectar Juego</td><td>—</td><td>Obtiene el nombre del juego desde la API de Twitch</td></tr>
+    </table>
+
+    <h3>Categorías de Frases (Modo Animadora)</h3>
+    <p>El archivo <code>data/karin_animadora.txt</code> contiene frases organizadas en secciones. La IA genera frases nuevas y las guarda automáticamente:</p>
+    <ul>
+      <li><strong>Frases Motivacionales Generales</strong> — Ánimo y motivación</li>
+      <li><strong>Frases Motivacionales Gamer</strong> — Frases épicas de gaming</li>
+      <li><strong>Poesía Gamer</strong> — Poemas sobre videojuegos</li>
+      <li><strong>Narradora</strong> — Voz de cuentacuentos épica y pausada</li>
+      <li><strong>Saludos Personalizados</strong> — Saluda a usuarios con [USUARIO]</li>
+    </ul>
+    <p><strong>Sistema anti-repetición:</strong> las frases se organizan en pools aleatorios y no se repiten hasta agotar todas.</p>
+
+    <img src="tutorial_images/Chat Bot IA.png" alt="Pestaña Chat Bot IA">
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ API KEYS -->
+<section id="api-keys">
+  <div class="container">
+    <h2><span class="icon">🔑</span> API Keys</h2>
+    <p>Gestiona las claves de API necesarias para que funcione la aplicación. Las claves se almacenan cifradas con <strong>Fernet (AES-128-CBC)</strong> en <code>config/secrets.enc</code>.</p>
+
+    <div class="card-grid">
+      <div class="card" style="border-left: 3px solid #fbbf24;">
+        <h4>🟡 Cerebras</h4>
+        <p><strong>Usos:</strong> Chat Bot IA, Push-to-Talk, respuestas de Twitch</p>
+        <p><strong>Prefijo:</strong> <code>csk-</code> / <code>csk_</code></p>
+        <p><strong>Web:</strong> <a href="https://cloud.cerebras.ai" target="_blank" style="color:var(--pink)">cloud.cerebras.ai</a></p>
+      </div>
+      <div class="card" style="border-left: 3px solid #3b82f6;">
+        <h4>🔵 Groq</h4>
+        <p><strong>Usos:</strong> Comentarista (Visión IA), modelos de visión</p>
+        <p><strong>Prefijo:</strong> <code>gsk_</code></p>
+        <p><strong>Web:</strong> <a href="https://console.groq.com" target="_blank" style="color:var(--pink)">console.groq.com</a></p>
+      </div>
+      <div class="card" style="border-left: 3px solid #ef4444;">
+        <h4>🔴 Google Studio IA</h4>
+        <p><strong>Usos:</strong> Chat Bot IA, Visión IA (Gemini)</p>
+        <p><strong>Prefijo:</strong> <code>AIza</code></p>
+        <p><strong>Web:</strong> <a href="https://aistudio.google.com" target="_blank" style="color:var(--pink)">aistudio.google.com</a></p>
+      </div>
+    </div>
+
+    <h3>Funciones de cada clave</h3>
+    <table>
+      <tr><th>Función</th><th>Proveedor</th><th>Modelos</th></tr>
+      <tr><td>Chat Twitch (!IA)</td><td>Cerebras</td><td>llama3.1-8b, qwen-3-235b-a22b-instruct, gpt-oss-120b</td></tr>
+      <tr><td>Push-to-Talk</td><td>Cerebras</td><td>llama3.1-8b</td></tr>
+      <tr><td>Comentarista Visión</td><td>Groq / Google Studio</td><td>llama-3.2-11b-vision, gemini-2.0-flash</td></tr>
+      <tr><td>Comentarista Texto</td><td>Groq / Cerebras / Google Studio</td><td>Según configuración</td></tr>
+    </table>
+
+    <p>Cada tarjeta tiene:</p>
+    <ul>
+      <li><strong>Campo de clave</strong> — Con máscara de contraseña y botón 👁 para mostrar/ocultar</li>
+      <li><strong>💾 Guardar</strong> — Valida el prefijo y guarda cifrado</li>
+      <li><strong>🧪 Test</strong> — Envía una petición de prueba para verificar que la clave funciona</li>
+      <li><strong>Enlace de proveedor</strong> — Acceso directo a la página de gestión de claves</li>
+      <li><strong>Estado</strong> — ✅ Guardada (últimos 6 caracteres visibles) o ❌ No configurada</li>
+    </ul>
+
+    <img src="tutorial_images/API Key.png" alt="Pestaña API Keys">
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ SISTEMA IA -->
+<section id="ia-system">
+  <div class="container">
+    <h2><span class="icon">🧠</span> Sistema de IA</h2>
+    <p>La aplicación usa tres proveedores de IA, cada uno especializado para diferentes tareas.</p>
+
+    <h3>Proveedores</h3>
+    <table>
+      <tr><th>Proveedor</th><th>Modelos Texto</th><th>Modelos Visión</th><th>Formato API</th></tr>
+      <tr>
+        <td><strong>Groq</strong></td>
+        <td>llama-3.1-8b-instant, llama-3.3-70b-versatile</td>
+        <td>llama-3.2-11b-vision-preview, llama-3.2-90b-vision-preview, llava-v1.5-7b-4096-preview, meta-llama/llama-4-scout-17b-16e-instruct</td>
+        <td>OpenAI-compatible</td>
+      </tr>
+      <tr>
+        <td><strong>Cerebras</strong></td>
+        <td>llama3.1-8b, qwen-3-235b-a22b-instruct, gpt-oss-120b</td>
+        <td>— (no soporta visión)</td>
+        <td>OpenAI-compatible</td>
+      </tr>
+      <tr>
+        <td><strong>Google Studio</strong></td>
+        <td>gemini-2.0-flash, gemini-1.5-pro, gemini-1.5-flash</td>
+        <td>gemini-2.0-flash, gemini-1.5-pro, gemini-1.5-flash</td>
+        <td>Google propio</td>
+      </tr>
+    </table>
+
+    <h3>Funciones Principales</h3>
+    <div class="card-grid">
+      <div class="card">
+        <h4>ask_ai()</h4>
+        <p>Envía mensajes de texto al proveedor. Soporta rate limiting (429) con backoff exponencial, reintentos automáticos, y limpieza de markdown.</p>
+      </div>
+      <div class="card">
+        <h4>ask_vision()</h4>
+        <p>Envía imágenes + texto a modelos con visión. Soporta Groq y Google Studio con sus formatos API específicos.</p>
+      </div>
+      <div class="card">
+        <h4>Sistema de Memoria</h4>
+        <p>Memoria persistente por usuario en <code>data/memoria.json</code>: historial (últimos 10 mensajes), datos importantes, estado de ánimo (-5 a +5) y emoción (0-6).</p>
+      </div>
+      <div class="card">
+        <h4>Detección de Emociones</h4>
+        <p>Analiza el texto del usuario para detectar: neutral, feliz, emocionado, enojado, triste, enfermo, aburrido. Ajusta voz TTS y prefijos según la emoción.</p>
+      </div>
+    </div>
+
+    <h3>Karin Vision Lite</h3>
+    <p>Sistema de detección visual optimizado para bajo consumo de CPU/RAM. Detecta:</p>
+    <ul>
+      <li><strong>Personajes:</strong> personaje_principal, personaje_secundario, enemigo, npc</li>
+      <li><strong>UI:</strong> barras de vida, minimapas, botones, menús</li>
+      <li><strong>Movimiento:</strong> figuras en movimiento, shake de pantalla, scroll</li>
+      <li><strong>Arte:</strong> pixelart_2d, smooth_2d, dimension_2_5d, dimension_3d</li>
+      <li><strong>Colores:</strong> rojo, naranja, amarillo, verde, azul, morado, oscuro, claro</li>
+    </ul>
+    <p>Usa frame-skipping: métodos ligeros cada frame (~40ms), métodos pesados solo cada ~1s. Sin HOG ni KNN para ahorrar RAM (~288MB vs ~450MB original).</p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ AYUDA -->
+<section id="ayuda">
+  <div class="container">
+    <h2><span class="icon">❓</span> Ayuda / Créditos</h2>
+    <p>Información de la aplicación, licencia y enlaces útiles.</p>
+
+    <h3>Enlaces</h3>
+    <ul>
+      <li><strong>GitHub</strong> — Repositorio del proyecto</li>
+      <li><strong>Groq Console</strong> — Gestión de claves Groq</li>
+      <li><strong>Cerebras Cloud</strong> — Gestión de claves Cerebras</li>
+      <li><strong>Twitch Developer</strong> — Gestión de aplicaciones Twitch</li>
+      <li><strong>Apache License 2.0</strong> — Licencia del proyecto</li>
+    </ul>
+
+    <h3>Librerías de Terceros</h3>
+    <ul>
+      <li>Vosk (Apache 2.0)</li>
+      <li>Edge TTS (Microsoft)</li>
+      <li>CustomTkinter (MIT)</li>
+      <li>OpenCV (Apache 2.0)</li>
+      <li>TwitchIO (MIT)</li>
+      <li>ONNX Runtime (MIT)</li>
+      <li>dxcam (MIT)</li>
+      <li>Groq / Cerebras API</li>
+    </ul>
+
+    <img src="tutorial_images/Ayuda.png" alt="Pestaña Ayuda">
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════ CONFIG -->
+<section id="config">
+  <div class="container">
+    <h2><span class="icon">⚙️</span> Configuración Completa</h2>
+    <p>Todas las opciones de configuración se guardan en dos archivos:</p>
+    <ul>
+      <li><strong><code>config/config.txt</code></strong> — Configuración no sensible (texto plano, formato clave=valor)</li>
+      <li><strong><code>config/secrets.enc</code></strong> — Claves de API cifradas con Fernet (AES-128-CBC)</li>
+    </ul>
+
+    <table>
+      <tr><th>Clave</th><th>Tipo</th><th>Defecto</th><th>Descripción</th></tr>
+      <tr><td><code>SELECTED_PROMPT</code></td><td>String</td><td>—</td><td>Personalidad activa</td></tr>
+      <tr><td><code>SPEAKER\_DEVICE</code></td><td>Int</td><td>0</td><td>Dispositivo Bot Speaker</td></tr>
+      <tr><td><code>IA_DEVICE</code></td><td>Int</td><td>0</td><td>Dispositivo IA Voz</td></tr>
+      <tr><td><code>MONITOR\_DEVICE</code></td><td>Int</td><td>—</td><td>Dispositivo Monitor</td></tr>
+      <tr><td><code>PTT_KEY</code></td><td>String</td><td>F9</td><td>Tecla de Push-to-Talk</td></tr>
+      <tr><td><code>BOT_SPEAK_CMD</code></td><td>String</td><td>!sp</td><td>Comando voz masculina</td></tr>
+      <tr><td><code>BOT_SPEAKMAP_CMD</code></td><td>String</td><td>!spm</td><td>Comando voz femenina</td></tr>
+      <tr><td><code>BOT_IA_COMMAND</code></td><td>String</td><td>!IA</td><td>Comando IA chat</td></tr>
+      <tr><td><code>BOT_IA_VOICE</code></td><td>String</td><td>es-MX-DaliaNeural</td><td>Voz de IA</td></tr>
+      <tr><td><code>COMENTARISTA_JUEGO</code></td><td>String</td><td>—</td><td>Nombre del juego</td></tr>
+      <tr><td><code>COMENTARISTA_INTERVALO</code></td><td>Int</td><td>30</td><td>Intervalo de comentarios</td></tr>
+      <tr><td><code>COMENTARISTA_MODO</code></td><td>String</td><td>OCR</td><td>Modo del asistente</td></tr>
+      <tr><td><code>COMENTARISTA_COOLDOWN</code></td><td>Int</td><td>30</td><td>Cooldown entre comentarios</td></tr>
+      <tr><td><code>COMENTARISTA_VOICE</code></td><td>String</td><td>es-MX-DaliaNeural</td><td>Voz del asistente</td></tr>
+      <tr><td><code>COMENTADOR_IA_PROVIDER</code></td><td>String</td><td>Groq</td><td>Proveedor IA del asistente</td></tr>
+      <tr><td><code>AUDIO_FILE_1-5</code></td><td>String</td><td>—</td><td>Ruta de sonido personalizado</td></tr>
+      <tr><td><code>AUDIO_CMD_1-5</code></td><td>String</td><td>—</td><td>Comando de sonido personalizado</td></tr>
+    </table>
+
+    <h3>Estructura del Proyecto</h3>
+    <div class="screenshot" style="text-align:left; font-family: monospace; font-size: .8rem; line-height: 1.5;">
+      Karin VTuber/<br>
+      ├── assets/logo/avatar.png<br>
+      ├── config/config.txt<br>
+      ├── config/secrets.enc<br>
+      ├── data/juegos.json<br>
+      ├── data/karin_animadora.txt<br>
+      ├── data/memoria.json<br>
+      ├── prompts/ (11 personalidades .txt)<br>
+      ├── src/<br>
+      │   ├── ai/ (ia.py, memory.py)<br>
+      │   ├── audio/ (audio.py, devices.py, stt.py)<br>
+      │   ├── bot/ (twitch_bot.py)<br>
+      │   ├── core/ (config.py, oauth_server.py, secrets_manager.py)<br>
+      │   ├── ui/ (main.py)<br>
+      │   └── utils/ (game_watcher.py, ptt.py, simple_detector.py, ...)<br>
+      ├── run.py<br>
+      └── run.bat
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>Karin VTuber — Hecho con 💜 por la comunidad</p>
+    <p><a href="https://github.com/Manuel0084/Karin-VTuber" target="_blank" style="color:var(--pink)">GitHub</a></p>
+  </div>
+</footer>
+
+</body>
+</html>
