@@ -14,18 +14,26 @@ from src.ai.memory import (
 twitch_messages_buffer = []
 TWITCH_BUFFER_MAX = 50
 chat_ia_activo = False
+bot_hablando = False
 
 
-def get_twitch_messages():
-    return twitch_messages_buffer.copy()
+def get_twitch_messages(limite=None):
+    msgs = twitch_messages_buffer.copy()
+    if limite:
+        return msgs[-limite:]
+    return msgs
 
 
 def is_chat_ia_activo():
     return chat_ia_activo
 
 
+def is_bot_hablando():
+    return bot_hablando
+
+
 def start_chat(app, token, nick, channel, api_key, speaker_dev, ia_dev, gui_app,
-               ia_command="!IA", ia_voice="es-MX-DaliaNeural"):
+               ia_command="!IA", ia_voice="es-MX-DaliaNeural", audio_slots=None):
     """
     Inicia el bot de Twitch en un hilo separado.
     ia_command: comando para invocar a la IA (ej: !IA)
@@ -49,6 +57,7 @@ def start_chat(app, token, nick, channel, api_key, speaker_dev, ia_dev, gui_app,
                         prefix="!",
                         initial_channels=[channel.strip().lstrip("#")]
                     )
+                    self._audio_slots = audio_slots or []
 
                 async def event_ready(self):
                     app.log(f"✅ Bot conectado como {self.nick} en #{channel}")
@@ -64,21 +73,39 @@ def start_chat(app, token, nick, channel, api_key, speaker_dev, ia_dev, gui_app,
                     if len(twitch_messages_buffer) > TWITCH_BUFFER_MAX:
                         twitch_messages_buffer.pop(0)
 
-                    # Manejar comandos manualmente (sin registry de twitchio)
+                    global bot_hablando
+
+                    for path, cmd in self._audio_slots:
+                        if cmd and content.lower() == cmd.lower():
+                            import os
+                            from src.audio import play_file
+                            if path and os.path.isfile(path):
+                                app.log(f"🔊 {user} activó sonido: {os.path.basename(path)}")
+                                threading.Thread(target=play_file, args=(path, speaker_dev), daemon=True).start()
+                            else:
+                                app.log(f"⚠ Archivo de audio no encontrado: {path}")
+                            return
+
                     if content.lower().startswith("!sp "):
                         texto = content[4:].strip()
                         if texto:
+                            bot_hablando = True
                             speak(f"{user} dice: {texto}", "es-ES-AlvaroNeural", speaker_dev)
+                            bot_hablando = False
 
                     elif content.lower().startswith("!sph "):
                         texto = content[5:].strip()
                         if texto:
+                            bot_hablando = True
                             speak(f"{user} dice: {texto}", "es-ES-AlvaroNeural", speaker_dev)
+                            bot_hablando = False
 
                     elif content.lower().startswith("!spm "):
                         texto = content[5:].strip()
                         if texto:
+                            bot_hablando = True
                             speak(f"{user} dice: {texto}", "es-MX-DaliaNeural", speaker_dev)
+                            bot_hablando = False
 
                     elif content.lower().startswith(f"{ia_command.lower()} "):
                         cmd_len = len(ia_command) + 1
@@ -170,8 +197,11 @@ def _procesar_ia(user, texto, mem_data, api_key, gui_app, ia_dev, app, ia_voice=
         except Exception:
             pass
 
+        global bot_hablando
         stop_audio()
+        bot_hablando = True
         speak(mensaje_final, voz, ia_dev)
+        bot_hablando = False
 
     except Exception as e:
         import traceback
