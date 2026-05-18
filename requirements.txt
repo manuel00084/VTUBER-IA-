@@ -13,5 +13,5 @@ mss>=9.0.0
 vosk>=0.3.45
 twitchio>=2.8.0
 cryptography>=41.0.0
-easyocr>=1.7.0
 scipy>=1.10.0
+rapidocr-onnxruntime>=1.4.0

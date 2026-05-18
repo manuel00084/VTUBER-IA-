@@ -3,7 +3,6 @@ Karin VTuber - Launcher
 """
 import os
 import sys
-import glob
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if hasattr(sys, '_MEIPASS'):
