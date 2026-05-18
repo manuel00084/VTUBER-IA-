@@ -4,7 +4,7 @@ oauth_server.py
 import http.server, threading, webbrowser, urllib.parse, requests
 
 from src.core.secrets_manager import (
-    load_config, save_config, set_secret
+    load_config, save_config
 )
 
 REDIRECT_URI = "http://localhost:3000"

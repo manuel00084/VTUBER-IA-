@@ -9,7 +9,7 @@ ENCRYPTION_PASSWORD = "KarinVTuber2024SecretKey!"
 
 SENSITIVE_KEYS = {
     "TWITCH_CLIENT_ID", "TWITCH_CLIENT_SECRET", "TWITCH_TOKEN",
-    "GROQ_API_KEY", "CEREBRAS_API_KEY", "GOOGLE_API_KEY",
+    "GROQ_API_KEY", "CEREBRAS_API_KEY", "GOOGLE_STUDIO_API_KEY",
     "FISH_API_KEY",
 }
 
@@ -47,14 +47,6 @@ def _save_secrets(secrets):
     encoded = base64.b64encode(encrypted).decode()
     with open(SECRETS_PATH, "w", encoding="utf-8") as f:
         f.write(encoded)
-
-def get_secret(key_name, default=""):
-    return _load_secrets().get(key_name, default)
-
-def set_secret(key_name, value):
-    secrets = _load_secrets()
-    secrets[key_name] = value
-    _save_secrets(secrets)
 
 def clear_secret(key_name):
     secrets = _load_secrets()
@@ -118,30 +110,6 @@ def save_config(config):
             changed = True
     if changed:
         _save_secrets(secrets)
-
-def get_twitch_client_id():
-    return get_secret("TWITCH_CLIENT_ID", "")
-
-def get_twitch_client_secret():
-    return get_secret("TWITCH_CLIENT_SECRET", "")
-
-def get_all_api_keys():
-    s = _load_secrets()
-    return {
-        "GROQ_API_KEY": s.get("GROQ_API_KEY", ""),
-        "CEREBRAS_API_KEY": s.get("CEREBRAS_API_KEY", ""),
-        "GOOGLE_API_KEY": s.get("GOOGLE_API_KEY", ""),
-    }
-
-def save_all_api_keys(groq_key, cerebras_key, google_key):
-    secrets = _load_secrets()
-    if groq_key:
-        secrets["GROQ_API_KEY"] = groq_key
-    if cerebras_key:
-        secrets["CEREBRAS_API_KEY"] = cerebras_key
-    if google_key:
-        secrets["GOOGLE_API_KEY"] = google_key
-    _save_secrets(secrets)
 
 
 def _migrate_plaintext_secrets():
