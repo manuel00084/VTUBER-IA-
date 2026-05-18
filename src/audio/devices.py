@@ -1,7 +1,8 @@
+import sounddevice as sd
+
+
 def get_output_devices():
     try:
-        import sounddevice as sd
-
         devices = sd.query_devices()
         output_devices = []
 
