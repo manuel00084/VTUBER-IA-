@@ -1515,6 +1515,14 @@ class App(ctk.CTk):
             lnk.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
         ctk.CTkFrame(card, height=6, fg_color="transparent").pack()
 
+        # Botón para abrir manual
+        btn_row = ctk.CTkFrame(card, fg_color="transparent")
+        btn_row.pack(fill="x", padx=14, pady=(0, 10))
+        ctk.CTkButton(btn_row, text="📖  Abrir Manual Completo", fg_color=PURP, text_color="#f3e8ff",
+                      height=36, corner_radius=8, hover_color="#a855f7",
+                      command=lambda: webbrowser.open(
+                          "file:///" + os.path.join(os.path.dirname(__file__), "..", "..", "tutorial.html").replace("\\", "/"))).pack()
+
         # ── Guía rápida ──
         guide = mk(tab, accent=True)
         guide.pack(fill="x", padx=14, pady=(0, 6))
