@@ -13,7 +13,7 @@ class PTTManager:
 
     def __init__(self, app, ask_ai_fn, speak, stop_audio, config,
                  get_devices, current_prompt, key="f9",
-                 voice="es-MX-DaliaNeural"):
+                 voice="es-MX-DaliaNeural", volume=2.0):
         if keyboard is None:
             raise RuntimeError("Libreria 'keyboard' no instalada. Ejecuta: pip install keyboard")
 
@@ -26,6 +26,7 @@ class PTTManager:
         self.current_prompt = current_prompt
         self.key = key
         self.voice = voice
+        self.volume = volume
 
         self.recording = False
         self._lock = threading.Lock()
@@ -45,7 +46,7 @@ class PTTManager:
                 return
             self.recording = True
         try:
-            from stt import listen_stream_start
+            from src.audio.stt import listen_stream_start
             self.stop_audio()
             listen_stream_start()
             self._log("Grabando... (suelta F9 para enviar)")
@@ -63,7 +64,7 @@ class PTTManager:
 
     def _process(self):
         try:
-            from stt import listen_stream_stop
+            from src.audio.stt import listen_stream_stop
             text = listen_stream_stop()
             if not text:
                 self._log("No se entendio nada")
@@ -75,7 +76,7 @@ class PTTManager:
             respuesta = self.ask_ai(text, api_key, self.current_prompt(), "cerebras")
             self._log(f"IA: {respuesta}")
             _, ia_dev = self.get_devices()
-            self.speak(respuesta, self.voice, ia_dev)
+            self.speak(respuesta, self.voice, ia_dev, volume=self.volume)
         except Exception as e:
             self._log(f"PTT error: {e}")
             traceback.print_exc()

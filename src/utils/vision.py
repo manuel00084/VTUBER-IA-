@@ -1,7 +1,6 @@
 """
 vision.py — Utilidades de visión: motion, color, templates, background subtraction
 """
-import random, re
 import cv2
 import numpy as np
 
@@ -28,81 +27,6 @@ def detectar_movimiento(frame_actual, frame_anterior, umbral=0.03):
         return mov
     except Exception:
         return {"hay": False, "intensidad": 0, "direccion": "ninguna"}
-
-
-
-
-
-def sistema_reglas(texto, objetos, movimiento, color_dom, colores_hsv, templates, bg_mask):
-    import random
-
-    if texto:
-        tl = texto.lower()
-        if re.search(r"muerte|morir|game over|perdiste|fallaste", tl):
-            return random.choice([
-                "Oh no! Animo, esto no termina aqui.",
-                "Uy, eso dolio. Pero vamos, a levantarse.",
-                "No pasa nada, de los errores se aprende.",
-            ])
-        if re.search(r"victoria|ganaste|completado|logro|trophy", tl):
-            return random.choice([
-                "Eso es! Bien jugado.",
-                "Lo sabia, sabia que podias.",
-                "Que bien se siente ganar, eh?",
-            ])
-        if re.search(r"peligro|enemigo|boss|jefe|cuidado", tl):
-            return random.choice([
-                "Cuidado! Algo se acerca...",
-                "Ojo ahi, que viene curvas.",
-                "Preparate, que esto se pone feo.",
-            ])
-        if re.search(r"pausa|menu|opciones|configuracion", tl):
-            return random.choice([
-                "Menu en pausa. Tomate el tiempo que necesites.",
-                "Pausa para respirar y planear el proximo paso.",
-                "Ajustes abiertos, elige con calma.",
-            ])
-        if re.search(r"cargando|loading", tl):
-            return random.choice([
-                "Cargando... ya casi, paciencia.",
-                "Mientras carga, cuentame algo.",
-                "Cargando, cargando... lista en un momento.",
-            ])
-
-    if texto:
-        return texto
-
-    if bg_mask and colores_hsv:
-        if colores_hsv.get("rojo", 0) > 5000 and bg_mask["porcentaje"] > 5:
-            return random.choice(["Accion! Algo se esta moviendo.", "Se esta armando, no te despistes.", "Esto se esta poniendo intenso."])
-
-    info = []
-
-    if colores_hsv and not info:
-        if colores_hsv.get("rojo", 0) > 3000:
-            info.append(random.choice(["Hay mucho rojo, pelea a la vista?", "Rojo intenso, algo se esta cociendo."]))
-        elif colores_hsv.get("verde", 0) > 3000:
-            info.append(random.choice(["Verde por todas partes, zona tranquila.", "La calma antes de la tormenta, quizas."]))
-
-    if texto and not info:
-        info.append(texto)
-
-    if not info:
-        colores_map = {
-            "rojo": ["Rojo, senal de peligro.", "Hay bastante rojo por ahi."],
-            "naranja": ["Tono anaranjado, algo se calienta?", "Naranja en pantalla."],
-            "verde": ["Todo en calma, se puede bajar la guardia.", "Verde, zona segura."],
-            "azul": ["Ambiente tranquilo, todo en orden.", "Tonalidad azul, relax."],
-            "oscuro": ["Esta oscuro, pero seguimos.", "Oscuridad, a ver que sale."],
-            "claro": ["Mucha luz, se ve todo bien.", "Dia despejado en la pantalla."],
-        }
-        msg = colores_map.get(color_dom)
-        if msg:
-            return random.choice(msg) if isinstance(msg, list) else msg
-
-    if info:
-        return random.choice(info)
-    return None
 
 
 def detectar_colores_hsv(img_np, rangos=None):
