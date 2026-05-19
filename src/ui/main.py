@@ -9,7 +9,7 @@ except ImportError:
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-APP_VERSION = "0.9.0-beta"
+APP_VERSION = "0.9.1-beta"
 APP_NAME = "Karin VTuber -IA-"
 
 from src.core.config import load_config
@@ -733,7 +733,7 @@ class App(ctk.CTk):
         sw_card.pack(fill="x", padx=14, pady=(0, 6))
         lb(sw_card, "🔧  Módulos activos", sz=11, bold=True, col=PURP).pack(anchor="w", padx=12, pady=(8, 4))
         
-        def _crear_switch(parent, texto, attr_switch, attr_indicador, default=True):
+        def _crear_switch(parent, texto, attr_switch, attr_indicador, default=True, badge=None):
             row = ctk.CTkFrame(parent, fg_color="transparent")
             row.pack(fill="x", padx=12, pady=2)
             row.grid_columnconfigure(1, weight=1)
@@ -742,16 +742,23 @@ class App(ctk.CTk):
                                fg_color=CARD2, progress_color=BORD, button_color=PURP,
                                font=("Segoe UI", 11))
             sw.grid(row=0, column=0, sticky="w")
+            if badge:
+                lb(row, badge, sz=8, col="#f59e0b").grid(row=0, column=1, sticky="w", padx=(4, 0))
             ind = lb(row, "●", sz=14, col=GRN_T if var.get() else RED_T)
-            ind.grid(row=0, column=1, sticky="e", padx=(0, 4))
+            ind.grid(row=0, column=2, sticky="e", padx=(0, 4))
             def _on_toggle(*_a):
-                ind.configure(text_color=GRN_T if var.get() else RED_T)
-                from src.core.config import load_config, save_config
-                cfg = load_config()
-                cfg[attr_switch.upper()] = "1" if var.get() else "0"
-                config[attr_switch.upper()] = cfg[attr_switch.upper()]
-                save_config(cfg)
-                self._reiniciar_comentarista()
+                try:
+                    ind.configure(text_color=GRN_T if var.get() else RED_T)
+                    from src.core.config import load_config, save_config
+                    cfg = load_config()
+                    cfg[attr_switch.upper()] = "1" if var.get() else "0"
+                    config[attr_switch.upper()] = cfg[attr_switch.upper()]
+                    save_config(cfg)
+                    self._reiniciar_comentarista()
+                except Exception as ex:
+                    self.log(f"⚠ Error al cambiar {attr_switch}: {ex}")
+                    import traceback
+                    self.log(traceback.format_exc())
             var.trace_add("write", _on_toggle)
             setattr(self, attr_switch, var)
             setattr(self, attr_indicador, ind)
@@ -766,9 +773,10 @@ class App(ctk.CTk):
         col2.grid(row=0, column=1, sticky="ew", padx=(4, 0))
         
         _crear_switch(col1, "📖 OCR", "sw_ocr", "ind_ocr")
-        _crear_switch(col1, "👁️ Karin Vision", "sw_karin_vision", "ind_karin_vision")
+        _crear_switch(col1, "👁️ Karin Vision", "sw_karin_vision", "ind_karin_vision", badge="⚗ Experimental")
         _crear_switch(col2, "🎭 Karin Animadora", "sw_karin_animadora", "ind_karin_animadora")
-        _crear_switch(col2, "🤖 Vision IA", "sw_vision_ia", "ind_vision_ia")
+        _crear_switch(col2, "🟢 Groq Vision", "sw_groq_vision", "ind_groq_vision")
+        _crear_switch(col2, "🔵 Google Vision", "sw_google_vision", "ind_google_vision")
         
         btns = ctk.CTkFrame(c, fg_color="transparent")
         btns.pack(fill="x", padx=14, pady=(0, 10))
@@ -852,13 +860,16 @@ class App(ctk.CTk):
     
     def _iniciar_comentarista(self):
         # Construir modo desde switches
+        # ── Construir modo desde switches ──
         partes = []
         if hasattr(self, 'sw_ocr') and self.sw_ocr.get():
             partes.append("OCR")
         if hasattr(self, 'sw_karin_vision') and self.sw_karin_vision.get():
             partes.append("Karin Vision")
-        if hasattr(self, 'sw_vision_ia') and self.sw_vision_ia.get():
-            partes.append("Vision IA")
+        if hasattr(self, 'sw_groq_vision') and self.sw_groq_vision.get():
+            partes.append("Groq Vision")
+        if hasattr(self, 'sw_google_vision') and self.sw_google_vision.get():
+            partes.append("Google Vision")
         if hasattr(self, 'sw_karin_animadora') and self.sw_karin_animadora.get():
             partes.append("Karin Animadora")
         modo = " + ".join(partes) if partes else "OCR"
@@ -880,19 +891,10 @@ class App(ctk.CTk):
         for k, v in cfg.items():
             config[k] = v
         
-        # Obtener API Key del proveedor seleccionado
-        ia_provider = self.comentador_ia_provider.get().lower().replace(" ", "_")
-        ia_provider_map = {"google_studio_ia": "google_studio", "groq": "groq", "cerebras": "cerebras"}
-        ia_provider = ia_provider_map.get(ia_provider, "groq")
-        ia_key = ""
-        if ia_provider == "google_studio":
-            ia_key = cfg.get("GOOGLE_STUDIO_API_KEY", "")
-        elif ia_provider == "cerebras":
-            ia_key = cfg.get("CEREBRAS_API_KEY", "")
-        else:
-            ia_key = cfg.get("GROQ_API_KEY", "")
+        # Obtener API Key según el modo real, no el dropdown
+        ia_key, ia_provider = self._obtener_key_por_modo(modo, cfg)
         if not ia_key:
-            self.log(f"❌  Se necesita API Key para {self.comentador_ia_provider.get()}")
+            self.log(f"❌  Se necesita API Key para el modo {modo}")
             return
         self.log(f" IA disponible ({ia_provider})")
         
@@ -911,41 +913,63 @@ class App(ctk.CTk):
     def _reiniciar_comentarista(self):
         if self.game_watcher is None:
             return
-        partes = []
-        if hasattr(self, 'sw_ocr') and self.sw_ocr.get():
-            partes.append("OCR")
-        if hasattr(self, 'sw_karin_vision') and self.sw_karin_vision.get():
-            partes.append("Karin Vision")
-        if hasattr(self, 'sw_vision_ia') and self.sw_vision_ia.get():
-            partes.append("Vision IA")
-        if hasattr(self, 'sw_karin_animadora') and self.sw_karin_animadora.get():
-            partes.append("Karin Animadora")
-        modo = " + ".join(partes) if partes else "OCR"
-        self.log(f"🔄  Reiniciando comentarista: {modo}")
-        self.game_watcher.detener()
-        juego = self.juego_entry.get().strip()
-        voz = self.ia_voice_menu.get()
         try:
-            cooldown = int(self.comentarista_cooldown.get().strip() or 30)
-        except ValueError:
-            cooldown = 30
-        from src.core.config import load_config
-        cfg = load_config()
-        ia_provider = self.comentador_ia_provider.get().lower().replace(" ", "_")
-        ia_provider_map = {"google_studio_ia": "google_studio", "groq": "groq", "cerebras": "cerebras"}
-        ia_provider = ia_provider_map.get(ia_provider, "groq")
-        ia_key = cfg.get("GOOGLE_STUDIO_API_KEY" if ia_provider == "google_studio" else "CEREBRAS_API_KEY" if ia_provider == "cerebras" else "GROQ_API_KEY", "")
-        if not ia_key:
-            self.log("❌  No hay API Key para reiniciar")
-            return
-        self.game_watcher = GameWatcher(
-            speak_fn=speak,
-            stop_audio_fn=stop_audio,
-            get_devices_fn=lambda: self.get_devices(),
-            log_fn=self._log_comentarista
-        )
-        self.game_watcher.iniciar(voz=voz, juego=juego, modo=modo, ia_key=ia_key, ia_provider=ia_provider, cooldown=cooldown)
+            partes = []
+            if hasattr(self, 'sw_ocr') and self.sw_ocr.get():
+                partes.append("OCR")
+            if hasattr(self, 'sw_karin_vision') and self.sw_karin_vision.get():
+                partes.append("Karin Vision")
+            if hasattr(self, 'sw_groq_vision') and self.sw_groq_vision.get():
+                partes.append("Groq Vision")
+            if hasattr(self, 'sw_google_vision') and self.sw_google_vision.get():
+                partes.append("Google Vision")
+            if hasattr(self, 'sw_karin_animadora') and self.sw_karin_animadora.get():
+                partes.append("Karin Animadora")
+            modo = " + ".join(partes) if partes else "OCR"
+            self.log(f"🔄  Reiniciando comentarista: {modo}")
+            old = self.game_watcher
+            old.detener()
+            juego = self.juego_entry.get().strip()
+            voz = self.ia_voice_menu.get()
+            try:
+                cooldown = int(self.comentarista_cooldown.get().strip() or 30)
+            except ValueError:
+                cooldown = 30
+            from src.core.config import load_config
+            cfg = load_config()
+            ia_key, ia_provider = self._obtener_key_por_modo(modo, cfg)
+            if not ia_key:
+                self.log("❌  No hay API Key para reiniciar")
+                self.game_watcher = None
+                return
+            self.game_watcher = GameWatcher(
+                speak_fn=speak,
+                stop_audio_fn=stop_audio,
+                get_devices_fn=lambda: self.get_devices(),
+                log_fn=self._log_comentarista
+            )
+            self.game_watcher.iniciar(voz=voz, juego=juego, modo=modo, ia_key=ia_key, ia_provider=ia_provider, cooldown=cooldown)
+        except Exception as ex:
+            self.log(f"⚠ Error al reiniciar comentarista: {ex}")
+            import traceback
+            self.log(traceback.format_exc())
+            self.game_watcher = None
     
+    def _obtener_key_por_modo(self, modo, cfg):
+        """Retorna (ia_key, ia_provider) según el modo real, no el dropdown."""
+        if "Google Vision" in modo:
+            key = cfg.get("GOOGLE_STUDIO_API_KEY", "")
+            return key, "google_studio"
+        if "Groq Vision" in modo:
+            key = cfg.get("GROQ_API_KEY", "")
+            return key, "groq"
+        ia_provider = self.comentador_ia_provider.get().lower().replace(" ", "_")
+        mapa = {"google_studio_ia": "google_studio", "groq": "groq", "cerebras": "cerebras"}
+        ia_provider = mapa.get(ia_provider, "groq")
+        cfg_key = {"google_studio": "GOOGLE_STUDIO_API_KEY", "cerebras": "CEREBRAS_API_KEY"}.get(ia_provider, "GROQ_API_KEY")
+        key = cfg.get(cfg_key, "")
+        return key, ia_provider
+
     def _detener_comentarista(self):
         if self.game_watcher:
             self.game_watcher.detener()
@@ -975,6 +999,7 @@ class App(ctk.CTk):
     def _guardar_ia_command(self):
         cmd = self.ia_cmd_entry.get().strip()
         voz = self.ia_voice_menu.get()
+        provider = self.comentador_ia_provider.get()
         if not cmd:
             self.log("❌  Ingresa un comando válido")
             return
@@ -982,10 +1007,12 @@ class App(ctk.CTk):
         cfg = load_config()
         cfg["BOT_IA_COMMAND"] = cmd
         cfg["BOT_IA_VOICE"] = voz
+        cfg["COMENTADOR_IA_PROVIDER"] = provider
         save_config(cfg)
         config["BOT_IA_COMMAND"] = cmd
         config["BOT_IA_VOICE"] = voz
-        self.log(f"✅  Comando IA guardado: {cmd} → voz: {voz}")
+        config["COMENTADOR_IA_PROVIDER"] = provider
+        self.log(f"✅  Comando IA guardado: {cmd} → voz: {voz} | Proveedor: {provider}")
 
     def _test_ia_voice(self):
         voz = self.ia_voice_menu.get()
@@ -1493,12 +1520,12 @@ class App(ctk.CTk):
         guide.pack(fill="x", padx=14, pady=(0, 6))
         lb(guide, "📖  Guía rápida", sz=12, bold=True, col=PURP).pack(anchor="w", padx=14, pady=(10, 2))
         items = [
-            ("📊  Panel", "Control principal — personalidad, PTT, actividad y guardado rápido"),
-            ("🎧  Audio", "Selecciona dispositivos de salida para Bot Speaker, IA Voz y Monitor"),
-            ("🗣  Personalidad", "Perfil de la IA + Perfil del Streamer se inyectan como contexto en el prompt"),
-            ("🤖  Bot Speaker", "Comandos !sp / !spm para reproducir audio en Twitch + sonidos personalizados"),
-            ("💬  Chat Bot IA", "IA que responde en chat de Twitch + Comentarista automático de juegos"),
-            ("🔑  API Keys", "Configura tus claves: Groq, Cerebras, Google Studio IA"),
+            ("📊  Panel", "Control principal — perfiles, PTT, actividad en vivo y guardado rápido"),
+            ("🎧  Audio", "Selecciona dispositivos: Speaker (Bot), IA Voz (TTS) y Monitor (escucha)"),
+            ("🗣  Personalidad", "Perfil de la IA + Perfil del Streamer como contexto del prompt"),
+            ("🤖  Bot Speaker", "Comandos !sp / !spm. Sube MP3 y asígnales un comando personalizado"),
+            ("💬  Chat Bot IA", "IA que responde con voz en Twitch + Comentarista automático del juego"),
+            ("🔑  API Keys", "Groq (comentarista), Cerebras (chat), Google Studio (vision/chat)"),
         ]
         for icon_title, desc in items:
             row = ctk.CTkFrame(guide, fg_color="transparent")
@@ -1512,10 +1539,12 @@ class App(ctk.CTk):
         pf.pack(fill="x", padx=14, pady=(0, 6))
         lb(pf, "👤  Perfiles de IA y Streamer", sz=12, bold=True, col=PURP).pack(anchor="w", padx=14, pady=(10, 2))
         pf_info = [
-            "Perfil de la IA — Nombre, edad, signo, gustos, frases típicas, etc.",
-            "Perfil del Streamer / Player — Mismos campos + relación con la IA",
-            "Ambos se inyectan automáticamente como contexto ANTES del prompt de personalidad",
-            "Cada perfil tiene su botón 💾 Guardar para persistir los datos",
+            "Perfil de la IA — Nombre, edad, género, altura, gustos, frases típicas, cumpleaños, signo, trabajo",
+            "Perfil del Streamer / Player — Mismos campos: nombre, apellido, edad, género, cumpleaños, signo, altura, trabajo",
+            "Ambos perfiles se concatenan automáticamente como contexto ANTES del prompt de personalidad",
+            "La IA usa estos datos para saber quién es ella y quién es su compañero/player",
+            "Cada perfil tiene su botón 💾 Guardar para persistir los datos en config.txt",
+            "Los campos se cargan automáticamente al iniciar la aplicación",
         ]
         for t in pf_info:
             lb(pf, f"•  {t}", sz=9, col=MUT).pack(anchor="w", padx=14, pady=1)
@@ -1525,27 +1554,108 @@ class App(ctk.CTk):
         modes = mk(tab)
         modes.pack(fill="x", padx=14, pady=(0, 6))
         lb(modes, "🎮  Comentarista automático", sz=12, bold=True, col=PURP).pack(anchor="w", padx=14, pady=(10, 2))
-        mode_info = [
-            "OCR — Lectura de texto en pantalla con RapidOCR optimizado para juegos",
-            "Karin Vision Lite — Detección de objetos, movimiento, seguimiento y templates",
-            "Karin Animadora — Genera comentarios animados basados en detección visual",
-            "Vision IA — Envía capturas a la IA para descripción avanzada",
+        lb(modes, "Los módulos se activan con switches y se combinan entre sí:", sz=10, col=MUT).pack(anchor="w", padx=14, pady=(0, 6))
+
+        mode_details = [
+            ("📖 OCR", 
+             "Lectura de texto en pantalla con RapidOCR. "
+             "Pre-procesa la imagen: upscale 2x, eliminación de glow, CLAHE y sharpen. "
+             "Filtra detecciones pequeñas (<4% de la altura) y texto inválido (<4 caracteres, <30% letras). "
+             "Si detecta <2 resultados a resolución reducida, reintenta a resolución completa (720p). "
+             "El texto se narra con prefijo aleatorio: 'Veo en pantalla:', 'Pone:', 'Dice:', etc."),
+            ("⚗ Karin Vision Lite",
+             "Detección visual local sin IA externa. Usa OpenCV para: "
+             "detección de movimiento por frame difference, "
+             "seguimiento de objetos con centroid tracking, "
+             "análisis de escenas por templates predefinidos, "
+             "y máquina de estados del juego. No requiere API keys."),
+            ("🎭 Karin Animadora",
+             "Genera comentarios animados y dinámicos basados en la detección visual. "
+             "Combina datos de OCR + Karin Vision para producir reacciones más vivas. "
+             "Usa la IA de texto (proveedor seleccionado en dropdown) para generar las frases."),
+            ("🟢 Groq Vision",
+             "Captura la pantalla y envía la imagen a Groq para descripción visual. "
+             "Modelo: meta-llama/llama-4-scout-17b-16e-instruct. "
+             "Incluye OCR + contexto del juego en el prompt. "
+             "Tasa adaptable: 5-15s entre capturas. "
+             "Usa la API Key de Groq (gsk_...)."),
+            ("🔵 Google Vision",
+             "Captura la pantalla y envía la imagen a Gemini para descripción detallada. "
+             "Cadena de fallback automática: "
+             "gemini-2.0-flash → gemini-2.0-flash-001 → gemini-2.5-flash. "
+             "Incluye OCR + contexto del juego. "
+             "Usa la API Key de Google Studio (AIza...)."),
         ]
-        for m in mode_info:
-            lb(modes, f"•  {m}", sz=9, col=MUT).pack(anchor="w", padx=14, pady=1)
-        lb(modes, "Los módulos se activan/desactivan con switches y reinician el servicio en tiempo real",
-           sz=9, col=MUT).pack(anchor="w", padx=14, pady=(2, 1))
+        for icon_title, desc in mode_details:
+            row = ctk.CTkFrame(modes, fg_color="transparent")
+            row.pack(fill="x", padx=14, pady=2)
+            lb(row, icon_title, sz=11, bold=True, col=TXT, width=120).pack(side="left", anchor="n")
+            lb(row, desc, sz=9, col=MUT, wraplength=400).pack(side="left", padx=(8, 0), fill="x", expand=True)
+
+        lb(modes, "💡 Los módulos se pueden combinar (ej: OCR + Groq Vision). Al togglear, se reinicia el servicio.",
+           sz=9, col=MUT).pack(anchor="w", padx=14, pady=(6, 1))
         ctk.CTkFrame(modes, height=6, fg_color="transparent").pack()
-        
+
+        # ── Proveedores de IA ──
+        prov = mk(tab)
+        prov.pack(fill="x", padx=14, pady=(0, 6))
+        lb(prov, "🤖  Proveedores de IA", sz=12, bold=True, col=PURP).pack(anchor="w", padx=14, pady=(10, 2))
+        lb(prov, "Cada proveedor tiene su propia API Key y modelos disponibles:", sz=10, col=MUT).pack(anchor="w", padx=14, pady=(0, 6))
+
+        prov_details = [
+            ("🟢 Groq",
+             "Texto: llama-3.1-8b-instant (rápido), llama-3.3-70b-versatile (potente). "
+             "Visión: meta-llama/llama-4-scout-17b-16e-instruct (único activo). "
+             "Usado para: Comentarista, PTT. "
+             "Web: console.groq.com/keys — Key: gsk_..."),
+            ("🟡 Cerebras",
+             "Texto: llama3.1-8b (rápido), qwen-3-235b (MoE, 22B activos), gpt-oss-120b (avanzado). "
+             "Sin visión. "
+             "Usado para: Chat Bot IA, PTT, Twitch. "
+             "Web: cloud.cerebras.ai — Key: csk_..."),
+            ("🔴 Google Studio",
+             "Texto + Visión: gemini-2.0-flash → gemini-2.0-flash-001 → gemini-2.5-flash (fallback automático). "
+             "Usado para: Chat Bot IA, Google Vision. "
+             "Web: aistudio.google.com/app/apikey — Key: AIza..."),
+        ]
+        for icon_title, desc in prov_details:
+            row = ctk.CTkFrame(prov, fg_color="transparent")
+            row.pack(fill="x", padx=14, pady=2)
+            lb(row, icon_title, sz=11, bold=True, col=TXT, width=40).pack(side="left", anchor="n")
+            lb(row, desc, sz=9, col=MUT, wraplength=460).pack(side="left", padx=(4, 0), fill="x", expand=True)
+
+        lb(prov, "💡 Si un modelo falla (429, 400, 404), se intenta el siguiente en la cadena con backoff progresivo.",
+           sz=9, col=MUT).pack(anchor="w", padx=14, pady=(6, 1))
+        ctk.CTkFrame(prov, height=6, fg_color="transparent").pack()
+
+        # ── Sistema de Audio ──
+        audio = mk(tab)
+        audio.pack(fill="x", padx=14, pady=(0, 6))
+        lb(audio, "🔊  Sistema de Audio", sz=12, bold=True, col=PURP).pack(anchor="w", padx=14, pady=(10, 2))
+
+        audio_details = [
+            "Speaker (Bot) — Altavoz principal para comandos !sp / !spm del Bot Speaker en Twitch",
+            "IA Voz (TTS) — Dispositivo donde se reproduce la voz del Comentarista IA y Chat Bot",
+            "Monitor — Segundo dispositivo opcional: la IA se escucha en Speaker + Monitor simultáneamente",
+            "Volumen fijo 2.0 (ya no hay slider). Normalización al 85% para evitar distorsión",
+            "Push-To-Talk (PTT) — Mantén F9 (configurable) para hablar, se envía a la IA y responde con voz",
+            "Edge TTS — Voces neuronales en español: Dalia, Dario, Lia, Elvira, Emilia, etc.",
+        ]
+        for t in audio_details:
+            lb(audio, f"•  {t}", sz=9, col=MUT).pack(anchor="w", padx=14, pady=1)
+        ctk.CTkFrame(audio, height=6, fg_color="transparent").pack()
+
         # ── Requisitos ──
         req = mk(tab)
         req.pack(fill="x", padx=14, pady=(0, 6))
         lb(req, "⚙️  Requisitos", sz=12, bold=True, col=PURP).pack(anchor="w", padx=14, pady=(10, 2))
         reqs = [
-            "Python 3.10+",
-            "API Key de Groq, Cerebras o Google Studio IA",
-            "Cuenta de desarrollador en Twitch (para OAuth)",
-            "Modelo Vosk (vosk-model-small-es-0.42) para STT",
+            "Python 3.10 o superior",
+            "API Key de al menos un proveedor: Groq (gsk_), Cerebras (csk_) o Google Studio (AIza)",
+            "Cuenta de desarrollador en Twitch (dev.twitch.tv) para OAuth y Bot",
+            "Modelo Vosk pequeño español (vosk-model-small-es-0.42) para STT / PTT",
+            "Windows 10+ (dxcam para captura de pantalla rápida)",
+            "Conexión a internet para APIs de IA y TTS",
         ]
         for r in reqs:
             lb(req, f"•  {r}", sz=9, col=MUT).pack(anchor="w", padx=14, pady=1)
@@ -1560,7 +1670,7 @@ class App(ctk.CTk):
         a_link.pack(anchor="w", padx=12, pady=(0, 2))
         a_link.bind("<Button-1>", lambda e: webbrowser.open("http://www.apache.org/licenses/LICENSE-2.0"))
         lb(legal, "Desarrollado por Manuel0084", sz=10, col=MUT).pack(anchor="w", padx=12, pady=(2, 0))
-        lb(legal, "Copyright 2024-2025", sz=10, col=MUT).pack(anchor="w", padx=12, pady=(0, 6))
+        lb(legal, "Copyright 2024-2026", sz=10, col=MUT).pack(anchor="w", padx=12, pady=(0, 6))
 
         # ── Third Party ──
         tp = mk(tab)
@@ -1577,12 +1687,12 @@ class App(ctk.CTk):
             ("CustomTkinter", "MIT"),
             ("OpenCV", "Apache 2.0"),
             ("TwitchIO", "MIT"),
-            ("RapidOCR", "Apache 2.0"),
+            ("RapidOCR (ONNX)", "Apache 2.0"),
             ("ONNX Runtime", "MIT"),
             ("dxcam", "MIT"),
             ("Groq API", "Propietaria"),
             ("Cerebras API", "Propietaria"),
-            ("Google Studio IA", "Propietaria"),
+            ("Google Gemini API", "Propietaria"),
             ("Pillow", "Historical"),
         ]
         for i, (lib, lic) in enumerate(third_party):
