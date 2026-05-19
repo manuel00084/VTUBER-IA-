@@ -40,8 +40,8 @@ def _wait_engine(timeout=30.0):
 
 
 class GameOCR:
-    def __init__(self, max_resolucion=480, cache_duracion=5.0,
-                 umbral_cambio=0.04, conf_min=0.2):
+    def __init__(self, max_resolucion=720, cache_duracion=5.0,
+                 umbral_cambio=0.04, conf_min=0.3):
         self.max_resolucion = max_resolucion
         self.cache_duracion = cache_duracion
         self.umbral_cambio = umbral_cambio
@@ -52,21 +52,40 @@ class GameOCR:
         self._ultimo_frame = None
         self._lock = threading.Lock()
 
+    def _preprocess(self, img):
+        try:
+            h, w = img.shape[:2]
+            if h < 20 or w < 20:
+                return img
+
+            up = cv2.resize(img, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+
+            gray = cv2.cvtColor(up, cv2.COLOR_BGR2GRAY)
+
+            blur = cv2.GaussianBlur(gray, (0, 0), 15)
+            norm = cv2.divide(gray, blur, scale=255)
+
+            lab = cv2.cvtColor(cv2.cvtColor(norm, cv2.COLOR_GRAY2BGR), cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            l = clahe.apply(l)
+            contrast = cv2.merge([l, a, b])
+            contrast = cv2.cvtColor(contrast, cv2.COLOR_LAB2BGR)
+
+            gray2 = cv2.cvtColor(contrast, cv2.COLOR_BGR2GRAY)
+            blurred = cv2.GaussianBlur(gray2, (0, 0), 1.0)
+            sharpened = cv2.addWeighted(gray2, 1.8, blurred, -0.8, 0)
+
+            return cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR)
+        except Exception:
+            return img
+
     def _reducir(self, img):
         h, w = img.shape[:2]
         lado = max(h, w)
         if lado <= self.max_resolucion:
             return img
         e = self.max_resolucion / lado
-        return cv2.resize(img, (int(w * e), int(h * e)), cv2.INTER_LINEAR)
-
-    def _reducir_640(self, img):
-        """Reduce a 640px para re-intento cuando falla a baja resoluci�n."""
-        h, w = img.shape[:2]
-        lado = max(h, w)
-        if lado <= 640:
-            return None  # Ya est� a suficiente resoluci�n
-        e = 640.0 / lado
         return cv2.resize(img, (int(w * e), int(h * e)), cv2.INTER_LINEAR)
 
     def _hash(self, img):
@@ -87,17 +106,22 @@ class GameOCR:
         result, _ = _engine(img)
         if result is None:
             return []
+        h_img = img.shape[0]
         salida = []
         for box, txt, conf in result:
             txt = txt.strip()
             if len(txt) < 2 or conf < self.conf_min:
                 continue
+            bx = [int(min(p[0] for p in box)), int(min(p[1] for p in box)),
+                  int(max(p[0] for p in box)) - int(min(p[0] for p in box)),
+                  int(max(p[1] for p in box)) - int(min(p[1] for p in box))]
+            # Filtrar texto demasiado pequeño (menos de 4% de la altura de imagen)
+            if bx[3] < h_img * 0.04:
+                continue
             salida.append({
                 'text': txt,
                 'score': float(conf),
-                'box': [int(min(p[0] for p in box)), int(min(p[1] for p in box)),
-                        int(max(p[0] for p in box)) - int(min(p[0] for p in box)),
-                        int(max(p[1] for p in box)) - int(min(p[1] for p in box))]
+                'box': bx
             })
         return salida
 
@@ -130,7 +154,7 @@ class GameOCR:
             return []
 
         ahora = time.time()
-        img_opt = self._reducir(img)
+        img_opt = self._preprocess(self._reducir(img))
         h_act = self._hash(img_opt)
 
         with self._lock:
@@ -144,19 +168,15 @@ class GameOCR:
 
         resultados = self._ocr_en(img_opt)
 
-        if len(resultados) < 3 and self.max_resolucion < 640:
-            img_640 = self._reducir_640(img)
-            if img_640 is not None:
-                res_640 = self._ocr_en(img_640)
-                vistos = set()
-                fusion = []
-                for res in [res_640, resultados]:
-                    for r in res:
-                        clave = r['text'].strip().lower()[:40]
-                        if clave not in vistos:
-                            vistos.add(clave)
-                            fusion.append(r)
-                resultados = fusion
+        if len(resultados) < 2:
+            try:
+                img_full = self._preprocess(img)
+                if img_full.shape[0] > img_opt.shape[0] * 1.3:
+                    res_full = self._ocr_en(img_full)
+                    if len(res_full) > len(resultados):
+                        resultados = res_full
+            except Exception:
+                pass
 
         # Deduplicar: si hay textos muy parecidos, quedarse solo con el de mayor confianza
         resultados = self._deduplicar(resultados)
@@ -174,8 +194,8 @@ _inst = None
 _lock = threading.Lock()
 
 
-def get_game_ocr(max_resolucion=480, cache_duracion=5.0,
-                 umbral_cambio=0.04, conf_min=0.2):
+def get_game_ocr(max_resolucion=720, cache_duracion=5.0,
+                 umbral_cambio=0.04, conf_min=0.3):
     global _inst
     with _lock:
         if _inst is None:
@@ -184,8 +204,8 @@ def get_game_ocr(max_resolucion=480, cache_duracion=5.0,
         return _inst
 
 
-def ocr_read_text(img, lang=None, max_resolucion=480, cache_duracion=5.0,
-                  umbral_cambio=0.04, conf_min=0.2):
+def ocr_read_text(img, lang=None, max_resolucion=720, cache_duracion=5.0,
+                  umbral_cambio=0.04, conf_min=0.3):
     return get_game_ocr(max_resolucion, cache_duracion,
                         umbral_cambio, conf_min).read_text(img)
 

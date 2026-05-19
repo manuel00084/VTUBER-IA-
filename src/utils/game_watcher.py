@@ -296,7 +296,11 @@ class GameWatcher:
 
         background_subtractor_iniciar()
 
-        if "Vision IA" in modo:
+        if "Groq Vision" in modo:
+            self._ia_provider = "groq"
+            target = self._loop_vision_ia
+        elif "Google Vision" in modo:
+            self._ia_provider = "google_studio"
             target = self._loop_vision_ia
         elif "Karin Animadora" in modo:
             target = self._loop_karin_animadora
@@ -334,8 +338,22 @@ class GameWatcher:
             return False
         return True
 
+    def _texto_valido(self, texto):
+        t = texto.strip()
+        if len(t) < 4:
+            return False
+        letras = sum(1 for c in t if c.isalpha())
+        if letras < 3:
+            return False
+        if letras / max(len(t), 1) < 0.3:
+            return False
+        return True
+
     def _hablar(self, texto):
         if not self._puede_hablar():
+            return
+        if not self._texto_valido(texto):
+            self.log(f" Texto invalido: {texto}")
             return
         clave = texto.strip().lower()[:100]
         if clave in self._comentarios_vistos:
@@ -347,7 +365,6 @@ class GameWatcher:
         self._ultimo_comentario_hora = time.time()
         self.log(f" {texto}")
         _, ia_dev = self.get_devices()
-        self.log(f" Dispositivo IA: {ia_dev}")
         if ia_dev is not None and ia_dev != -1:
             self.speak(texto, self.voice, ia_dev, volume=2.0)
 
@@ -413,15 +430,11 @@ class GameWatcher:
             from src.utils.game_ocr_post import post_procesar_ocr
             from src.utils.game_ocr_lite import ocr_read_text
 
-            # PIL Image (RGB) -> numpy array BGR
             arr_rgb = np.array(img.convert("RGB"))
             arr_bgr = cv2.cvtColor(arr_rgb, cv2.COLOR_RGB2BGR)
 
-            # Ejecutar OCR con GameOCR Engine (RapidOCR)
-            resultados = ocr_read_text(arr_bgr, conf_min=0.1)
-
-            # Post-procesar (corregir palabras de juegos, filtrar basura)
-            resultados = post_procesar_ocr(resultados, conf_min=0.3)
+            resultados = ocr_read_text(arr_bgr, conf_min=0.3)
+            resultados = post_procesar_ocr(resultados, conf_min=0.4)
 
             if not resultados:
                 return ""
@@ -631,7 +644,11 @@ class GameWatcher:
                     texto = self._ocr_paddle(img)
                     
                     if texto:
-                        self._hablar(texto)
+                        prefijos = [
+                            "Veo en pantalla:", "Pone:", "Dice:",
+                            "El juego muestra:", " Aparece:",
+                        ]
+                        self._hablar(f"{random.choice(prefijos)} {texto}")
                 
                 time.sleep(0.2)  # Espera activa baja para respuesta razonable
                 gc.collect()
@@ -1245,14 +1262,8 @@ class GameWatcher:
                 self.log(f" Error en modo Karin Animadora: {e}")
                 time.sleep(2)
     def _loop_vision_ia(self):
-        """Modo 3: Vision IA + OCR + comentarios silenciosos - Optimizado"""
-        from src.ai.ia import ask_vision, PROVIDERS
-        cfg = PROVIDERS.get(self._ia_provider)
-        if not cfg or not cfg.get("models_vision"):
-            self.log(f"⚠ '{self._ia_provider}' no soporta imágenes. Usa Groq o Google Studio IA para visión.")
-            self.log(" Cambiando a modo OCR + IA texto.")
-            self._loop_ia()
-            return
+        """Modo Vision IA: envía captura a la IA para descripción avanzada"""
+        from src.ai.ia import ask_vision
         ultimo_ocr = 0
         intervalo_ocr_min = 5.0   # Mínimo 5 segundos entre OCR
         intervalo_ocr_max = 15.0  # Máximo 15 segundos entre OCR forzado
