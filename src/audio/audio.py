@@ -133,11 +133,16 @@ def audio_worker():
             try:
                 data, fs = sf.read(path, dtype='float32')
                 
-                # Reproducir en cada dispositivo por separado
+                import threading
+                threads = []
                 for dev in dev_list:
                     if dev is None or dev == -1:
                         continue
-                    _play_on_device(data, fs, dev, volume)
+                    t = threading.Thread(target=_play_on_device, args=(data, fs, dev, volume), daemon=True)
+                    t.start()
+                    threads.append(t)
+                for t in threads:
+                    t.join()
             except Exception as e:
                 print("ERROR playing audio:", e)
 
