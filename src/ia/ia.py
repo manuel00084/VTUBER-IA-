@@ -5,8 +5,7 @@ PROVIDERS = {
     "groq": {
         "url": "https://api.groq.com/openai/v1/chat/completions",
         "models_texto": ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"],
-        "models_vision": ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview",
-                          "llava-v1.5-7b-4096-preview", "meta-llama/llama-4-scout-17b-16e-instruct"],
+        "models_vision": ["meta-llama/llama-4-scout-17b-16e-instruct"],
     },
     "cerebras": {
         "url": "https://api.cerebras.ai/v1/chat/completions",
@@ -15,8 +14,8 @@ PROVIDERS = {
     },
     "google_studio": {
         "url": "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-        "models_texto": ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
-        "models_vision": ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+        "models_texto": ["gemini-2.0-flash", "gemini-2.0-flash-001", "gemini-2.5-flash"],
+        "models_vision": ["gemini-2.0-flash", "gemini-2.0-flash-001", "gemini-2.5-flash"],
     },
 }
 
@@ -122,77 +121,82 @@ def ask_vision(image_b64, texto, api_key, prompt="", modelo_idx=0, provider="gro
     if not cfg:
         cfg = PROVIDERS.get("groq")
     
-    if not cfg.get("models_vision"):
+    modelos = cfg.get("models_vision")
+    if not modelos:
         if log:
             log(f"⚠ '{provider}' no tiene modelos de visión disponibles")
         return None, modelo_idx, False
     
-    if provider == "google_studio":
-        # Google Studio AI uses a different API format
-        model_name = cfg["models_vision"][modelo_idx % len(cfg["models_vision"])]
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key.strip()}"
-        headers = {
-            "Content-Type": "application/json"
-        }
-        data = {
-            "contents": [{
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": image_b64
-                        }
+    for idx, modelo in enumerate(modelos):
+        for intento in range(2):
+            try:
+                if provider == "google_studio":
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={api_key.strip()}"
+                    headers = {"Content-Type": "application/json"}
+                    data = {
+                        "contents": [{
+                            "parts": [
+                                {"text": prompt + "\n\n" + texto},
+                                {"inline_data": {"mime_type": "image/jpeg", "data": image_b64}}
+                            ]
+                        }]
                     }
-                ]
-            }]
-        }
-    else:
-        # OpenAI-compatible format (Groq, Cerebras, etc.)
-        modelos = cfg["models_vision"]
-        url = cfg["url"]
-        modelo = modelos[modelo_idx % len(modelos)]
-        headers = {
-            "Authorization": f"Bearer {api_key.strip()}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "model": modelo,
-            "messages": [
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": [
-                    {"type": "image_url",
-                     "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
-                    {"type": "text", "text": texto}
-                ]}
-            ],
-            "max_tokens": 700,
-            "temperature": 0.05,
-        }
-    
-    try:
-        r = requests.post(url, json=data, headers=headers, timeout=30)
-        if r.status_code == 429:
-            return None, modelo_idx, True
-        if r.status_code == 400:
-            if log:
-                try:
-                    detalle = r.json().get("error", {}).get("message", r.text[:200])
-                except Exception:
-                    detalle = r.text[:200]
-                log(f"⚠ API 400 con {provider}/{modelo}: {detalle}")
-            return None, modelo_idx + 1, False
-        if r.status_code != 200:
-            return None, modelo_idx, False
-        
-        if provider == "google_studio":
-            respuesta = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        else:
-            respuesta = r.json()["choices"][0]["message"]["content"].strip()
-        
-        # Clean up common formatting characters
-        for char in ["*", "#", "`", "_"]:
-            respuesta = respuesta.replace(char, "")
-        return respuesta, modelo_idx, False
-    except:
-        return None, modelo_idx, False
+                else:
+                    url = cfg["url"]
+                    headers = {
+                        "Authorization": f"Bearer {api_key.strip()}",
+                        "Content-Type": "application/json"
+                    }
+                    data = {
+                        "model": modelo,
+                        "messages": [
+                            {"role": "system", "content": prompt},
+                            {"role": "user", "content": [
+                                {"type": "image_url",
+                                 "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+                                {"type": "text", "text": texto}
+                            ]}
+                        ],
+                        "max_tokens": 700,
+                        "temperature": 0.05,
+                    }
+                
+                r = requests.post(url, json=data, headers=headers, timeout=30)
+                if r.status_code == 429:
+                    espera = 2 ** (intento + 2)  # 4s, 8s
+                    time.sleep(espera)
+                    continue
+                if r.status_code in (400, 404):
+                    if log:
+                        try:
+                            detalle = r.json().get("error", {}).get("message", r.text[:200])
+                        except Exception:
+                            detalle = r.text[:200]
+                        log(f"⚠ API 400 con {provider}/{modelo}: {detalle}")
+                    break  # next model
+                if r.status_code in (401, 403):
+                    return None, idx, False
+                if r.status_code != 200:
+                    time.sleep(0.5)
+                    continue
+                
+                if provider == "google_studio":
+                    respuesta = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                else:
+                    respuesta = r.json()["choices"][0]["message"]["content"].strip()
+                
+                for char in ["*", "#", "`", "_"]:
+                    respuesta = respuesta.replace(char, "")
+                return respuesta, idx, False
+            except requests.exceptions.Timeout:
+                time.sleep(0.5)
+                continue
+            except requests.exceptions.ConnectionError:
+                return None, idx, False
+            except (KeyError, IndexError):
+                time.sleep(0.5)
+                continue
+            except Exception:
+                time.sleep(0.5)
+                continue
+    return None, len(modelos) - 1, False
