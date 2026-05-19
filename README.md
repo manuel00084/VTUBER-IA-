@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/status-beta-orange">
   <img src="https://img.shields.io/badge/version-v0.9.0-blue">
   <img src="https://img.shields.io/badge/python-3.10+-green">
-  <img src="https://img.shields.io/badge/license-MIT-purple">
+  <img src="https://img.shields.io/badge/license Apache 2.0purple">
 </p>
 
 ---
@@ -429,28 +429,23 @@ Algunas funciones aún están en fase beta. Puede aver errores que se me ayan es
 
 ---
 
-# 🛣️ Roadmap
+## 🖥️ Wallpapers para PC
 
-## v1.0
+Fondos optimizados para:
 
-* [ ] Mejor estabilidad
-* [ ] Optimización OCR
-* [ ] Mejoras de rendimiento
-* [ ] Traductor
-* [ ] sistema de monetizacion.
-* [ ] Mejor intefaz Grafica
+- 1920x1080 Full HD
+- 2560x1440 QHD
+- 4K Ultra HD
 
-## Futuro
 
-* [ ] Live2D
-* [ ] Memoria conversacional
-* [ ] Integración Twitch avanzada
-* [ ] Soporte Linux
-* [ ] Soporte MacOS
-* [ ] Modo streamer autónomo
-* [ ] IA emocional
-* [ ] Integración multi-modelo
-* [ ] Sistema VRM completo
+---
+
+## 📱 Wallpapers para Smartphone
+
+Versiones verticales adaptadas para:
+- Android
+- iPhone
+- AMOLED
 
 ---
 
@@ -484,17 +479,8 @@ Este proyecto está bajo licencia Apache 2.0
 
 # ⭐ Objetivo del Proyecto
 
-Karin VTuber -IA- busca explorar el futuro de:
-
-* VTubers autónomas
-* comentaristas IA
-* análisis visual en videojuegos
-* interacción en streaming
-* compañer@s IA en tiempo real
-* convertise entre los mejores
-* Superar Neurosama
-
-Combinando visión computacional, OCR y modelos de lenguaje modernos.
+Karin VTuber -IA- busca explorar el futuro de las compañer@s virtuales para gamers, combinando IA, entretenimiento y asistencia inteligente en una experiencia única y accesible para todos.
+busca explorar el futuro de las VTubers autónomas de nueva generación, combinando modelos de lenguaje, visión por computadora, voz e interacción en tiempo real.
 
 ---
 
